@@ -9,41 +9,9 @@
 #include "util/common.h"
 
 struct GBAVideo;
+struct mTileCache;
 
-DECL_BITFIELD(GBAVideoTileCacheConfiguration, uint32_t);
-DECL_BIT(GBAVideoTileCacheConfiguration, ShouldStore, 0);
-
-struct GBAVideoTileCacheEntry {
-	uint32_t paletteVersion;
-	uint32_t vramVersion;
-	uint8_t vramClean;
-	uint8_t palette256;
-};
-
-typedef struct GBAVideoTileCacheEntry GBAVideoTileCacheStatus[1024 * 3][16];
-
-struct GBAVideoTileCache {
-	uint16_t* cache;
-	GBAVideoTileCacheStatus status;
-	uint32_t globalPaletteVersion[32];
-	uint32_t globalPalette256Version[2];
-
-	uint16_t* vram;
-	uint16_t* palette;
-	uint16_t temporaryTile[64];
-
-	GBAVideoTileCacheConfiguration config;
-};
-
-void GBAVideoTileCacheInit(struct GBAVideoTileCache* cache);
-void GBAVideoTileCacheDeinit(struct GBAVideoTileCache* cache);
-void GBAVideoTileCacheConfigure(struct GBAVideoTileCache* cache, GBAVideoTileCacheConfiguration config);
-void GBAVideoTileCacheAssociate(struct GBAVideoTileCache* cache, struct GBAVideo* video);
-void GBAVideoTileCacheWriteVRAM(struct GBAVideoTileCache* cache, uint32_t address);
-void GBAVideoTileCacheWritePalette(struct GBAVideoTileCache* cache, uint32_t address);
-const uint16_t* GBAVideoTileCacheGetTile16(struct GBAVideoTileCache* cache, unsigned tileId, unsigned paletteId);
-const uint16_t* GBAVideoTileCacheGetTile16IfDirty(struct GBAVideoTileCache* cache, GBAVideoTileCacheStatus handle, unsigned tileId, unsigned paletteId);
-const uint16_t* GBAVideoTileCacheGetTile256(struct GBAVideoTileCache* cache, unsigned tileId, unsigned paletteId);
-const uint16_t* GBAVideoTileCacheGetTile256IfDirty(struct GBAVideoTileCache* cache, GBAVideoTileCacheStatus handle, unsigned tileId, unsigned paletteId);
+void GBAVideoTileCacheInit(struct mTileCache* cache);
+void GBAVideoTileCacheAssociate(struct mTileCache* cache, struct GBAVideo* video);
 
 #endif
