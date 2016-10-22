@@ -3,10 +3,13 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "platform/test/suite/suite.h"
+#include "util/test/suite.h"
 
-#include "platform/test/suite/common/common.h"
+#include "util/test/util.h"
+#include "core/test/core.h"
 
 int main() {
-	return mTestRunCommon() != 0;
+	int failures = TestRunUtil();
+	failures += TestRunCore();
+	return failures != 0;
 }
