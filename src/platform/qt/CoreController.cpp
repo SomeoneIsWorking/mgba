@@ -1339,8 +1339,10 @@ void CoreController::updateFastForward() {
 }
 
 void CoreController::updateROMInfo() {
+#ifdef USE_SQLITE3
 	const NoIntroDB* db = GBAApp::app()->gameDB();
 	NoIntroGame game{};
+#endif
 	m_crc32 = 0;
 	mCore* core = m_threadContext.core;
 	core->checksum(core, &m_crc32, mCHECKSUM_CRC32);
