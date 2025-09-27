@@ -96,6 +96,14 @@ else()
 	list(APPEND MAIN_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sw-sdl1.c)
 endif()
 
+# Add C platform files
+list(APPEND PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sdl_multiplayer.c)
+list(APPEND PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../c/c_utils.c)
+list(APPEND PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../c/c_log_controller.c)
+list(APPEND PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../c/c_core_controller.c)
+list(APPEND PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../c/c_multiplayer_controller.c)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../c)
+
 if(ENABLE_SCRIPTING)
 	if(BUILD_PYTHON)
 		list(APPEND PLATFORM_LIBRARY ${BINARY_NAME}-pylib)
