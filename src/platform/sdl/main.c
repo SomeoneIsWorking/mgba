@@ -44,12 +44,21 @@ static void _loadState(struct mCoreThread* thread) {
 	mCoreLoadStateNamed(thread->core, _state, SAVESTATE_RTC);
 }
 
+#include "../../platform/c/c_multiplayer_controller.h"
+#include "../../platform/c/c_core_controller.h"
+
+int mSDLRunMultiplayer(struct mSDLRenderer* renderers, int numPlayers, CMultiplayerController* multiplayer, CCoreController* cControllers[4], struct mCoreThread threads[4], struct mArguments* args, struct mStandardLogger* logger);
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
 	AttachConsole(ATTACH_PARENT_PROCESS);
 	freopen("CONOUT$", "w", stdout);
 #endif
-	struct mSDLRenderer renderer = {0};
+	int numPlayers = 1;
+	struct mSDLRenderer* renderers = NULL;
+	CMultiplayerController* multiplayer = NULL;
+	struct mCoreThread threads[4] = {0};
+	CCoreController* cControllers[4] = {0};
 
 	struct mCoreOptions opts = {
 		.useBios = true,
@@ -58,7 +67,7 @@ int main(int argc, char** argv) {
 		.rewindBufferInterval = 1,
 		.audioBuffers = 1024,
 		.videoSync = false,
-		.audioSync = true,
+		.audioSync = false,
 		.volume = 0x100,
 		.logLevel = mLOG_WARN | mLOG_ERROR | mLOG_FATAL,
 	};
@@ -84,98 +93,156 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
+	numPlayers = args.split > 1 ? args.split : 1;
+	renderers = calloc(numPlayers, sizeof(struct mSDLRenderer));
+	if (numPlayers > 1) {
+		multiplayer = cMultiplayerControllerCreate();
+	}
+
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
 		printf("Could not initialize video: %s\n", SDL_GetError());
 		mArgumentsDeinit(&args);
 		return 1;
 	}
 
-	renderer.core = mCoreFind(args.fname);
-	if (!renderer.core) {
-		printf("Could not run game. Are you sure the file exists and is a compatible game?\n");
-		mArgumentsDeinit(&args);
-		return 1;
-	}
+	// Initialize logger
+	mStandardLoggerInit(&_logger);
 
-	if (!renderer.core->init(renderer.core)) {
-		mArgumentsDeinit(&args);
-		return 1;
-	}
+	for (int i = 0; i < numPlayers; ++i) {
+		struct mSDLRenderer* renderer = &renderers[i];
+		renderer->core = mCoreFind(args.fname);
+		if (!renderer->core) {
+			printf("Could not run game. Are you sure the file exists and is a compatible game?\n");
+			mArgumentsDeinit(&args);
+			return 1;
+		}
 
-	renderer.core->baseVideoSize(renderer.core, &renderer.width, &renderer.height);
-	renderer.ratio = graphicsOpts.multiplier;
-	if (renderer.ratio == 0) {
-		renderer.ratio = 1;
-	}
-	opts.width = renderer.width * renderer.ratio;
-	opts.height = renderer.height * renderer.ratio;
+		if (!renderer->core->init(renderer->core)) {
+			mArgumentsDeinit(&args);
+			return 1;
+		}
 
-	mInputMapInit(&renderer.core->inputMap, &GBAInputInfo);
-	mCoreInitConfig(renderer.core, PORT);
-	mArgumentsApply(&args, &subparser, 1, &renderer.core->config);
+		renderer->core->baseVideoSize(renderer->core, &renderer->width, &renderer->height);
+		renderer->ratio = graphicsOpts.multiplier;
+		if (renderer->ratio == 0) {
+			renderer->ratio = 1;
+		}
 
-	mCoreConfigSetDefaultIntValue(&renderer.core->config, "logToStdout", true);
-	mCoreConfigLoadDefaults(&renderer.core->config, &opts);
-	mCoreLoadConfig(renderer.core);
+		opts.width = renderer->width * renderer->ratio;
+		opts.height = renderer->height * renderer->ratio;
 
-	renderer.viewportWidth = renderer.core->opts.width;
-	renderer.viewportHeight = renderer.core->opts.height;
-	renderer.player.fullscreen = renderer.core->opts.fullscreen;
-	renderer.player.windowUpdated = 0;
+		mInputMapInit(&renderer->core->inputMap, &GBAInputInfo);
+		mCoreInitConfig(renderer->core, PORT);
+		mArgumentsApply(&args, &subparser, 1, &renderer->core->config);
 
-	renderer.lockAspectRatio = renderer.core->opts.lockAspectRatio;
-	renderer.lockIntegerScaling = renderer.core->opts.lockIntegerScaling;
-	renderer.interframeBlending = renderer.core->opts.interframeBlending;
-	renderer.filter = renderer.core->opts.resampleVideo;
+		mCoreConfigSetDefaultIntValue(&renderer->core->config, "logToStdout", true);
+		mCoreConfigLoadDefaults(&renderer->core->config, &opts);
+		mCoreLoadConfig(renderer->core);
+
+		if (i == 0) {
+			mStandardLoggerConfig(&_logger, &renderer->core->config);
+		}
+
+		renderer->outputBuffer = malloc(renderer->width * renderer->height * sizeof(mColor));
+		renderer->core->setVideoBuffer(renderer->core, renderer->outputBuffer, renderer->width);
+
+		if (!mCoreLoadFile(renderer->core, args.fname)) {
+			printf("Could not load ROM for player %d\n", i);
+			return 1;
+		}
+		mCoreAutoloadSave(renderer->core);
+		mArgumentsApplyFileLoads(&args, renderer->core);
+
+		renderer->viewportWidth = renderer->core->opts.width;
+		renderer->viewportHeight = renderer->core->opts.height;
+
+		if (numPlayers == 1) {
 
 #ifdef BUILD_GL
-	if (mSDLGLCommonInit(&renderer)) {
-		mSDLGLCreate(&renderer);
-	} else
+			if (mSDLGLCommonInit(renderer)) {
+				mSDLGLCreate(renderer);
+			} else
 #elif defined(BUILD_GLES2) || defined(USE_EPOXY)
-	if (mSDLGLCommonInit(&renderer))
-	{
-		mSDLGLES2Create(&renderer);
-	} else
+			if (mSDLGLCommonInit(renderer))
+			{
+				mSDLGLES2Create(renderer);
+			} else
 #endif
-	{
-		mSDLSWCreate(&renderer);
-	}
+			{
+				mSDLSWCreate(renderer);
+			}
 
-	if (!renderer.init(&renderer)) {
-		mArgumentsDeinit(&args);
-		mCoreConfigDeinit(&renderer.core->config);
-		renderer.core->deinit(renderer.core);
-		return 1;
-	}
-
-	renderer.player.bindings = &renderer.core->inputMap;
-	mSDLInitBindingsGBA(&renderer.core->inputMap);
-	mSDLInitEvents(&renderer.events);
-	mSDLEventsLoadConfig(&renderer.events, mCoreConfigGetInput(&renderer.core->config));
-	mSDLAttachPlayer(&renderer.events, &renderer.player);
-	mSDLPlayerLoadConfig(&renderer.player, mCoreConfigGetInput(&renderer.core->config));
+			if (!renderer->init(renderer)) {
+				mArgumentsDeinit(&args);
+				mCoreConfigDeinit(&renderer->core->config);
+				renderer->core->deinit(renderer->core);
+				return 1;
+			}
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-	renderer.core->setPeripheral(renderer.core, mPERIPH_RUMBLE, &renderer.player.rumble.d.d);
+			// Set window position for side-by-side
+			if (numPlayers > 1) {
+				int x = (i % 2) * renderer->viewportWidth; // Side by side, no gap
+				int y = (i / 2) * renderer->viewportHeight; // Stacked if more than 2
+				SDL_SetWindowPosition(renderer->window, x, y);
+			}
 #endif
 
-	int ret;
+			renderer->player.bindings = &renderer->core->inputMap;
+			mSDLInitBindingsGBA(&renderer->core->inputMap);
+			mSDLInitEvents(&renderer->events);
+			mSDLEventsLoadConfig(&renderer->events, mCoreConfigGetInput(&renderer->core->config));
+			mSDLAttachPlayer(&renderer->events, &renderer->player);
+			mSDLPlayerLoadConfig(&renderer->player, mCoreConfigGetInput(&renderer->core->config));
 
-	// TODO: Use opts and config
-	mStandardLoggerInit(&_logger);
-	mStandardLoggerConfig(&_logger, &renderer.core->config);
-	ret = mSDLRun(&renderer, &args);
-	mSDLDetachPlayer(&renderer.events, &renderer.player);
-	mInputMapDeinit(&renderer.core->inputMap);
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+			renderer->core->setPeripheral(renderer->core, mPERIPH_RUMBLE, &renderer->player.rumble.d.d);
+#endif
+		}
 
-	mSDLDeinit(&renderer);
-	mStandardLoggerDeinit(&_logger);
+		// For multiplayer
+		if (multiplayer) {
+			// Create CCoreController wrapper
+			CCoreController* cController = cCoreControllerCreate(renderer->core, &threads[i]);
+			cCoreControllerSetPath(cController, args.fname, ".");
+			cCoreControllerSetLogger(cController, &(_logger.d)); // Set the logger
+			cCoreControllerStart(cController);
+			cMultiplayerControllerAttachGame(multiplayer, cController);
+			cControllers[i] = cController;
+		}
+	}
+
+	int ret = 0;
+	if (numPlayers > 1) {
+		ret = mSDLRunMultiplayer(renderers, numPlayers, multiplayer, cControllers, threads, &args, &_logger);
+	} else {
+		// Original single player
+		struct mSDLRenderer* renderer = &renderers[0];
+		ret = mSDLRun(renderer, &args);
+	}
+
+	for (int i = 0; i < numPlayers; ++i) {
+		struct mSDLRenderer* renderer = &renderers[i];
+		if (numPlayers == 1) {
+			mSDLDetachPlayer(&renderer->events, &renderer->player);
+			mInputMapDeinit(&renderer->core->inputMap);
+			mSDLDeinit(renderer);
+		}
+		free(renderer->outputBuffer);
+		mCoreConfigFreeOpts(&opts);
+		mCoreConfigDeinit(&renderer->core->config);
+		renderer->core->deinit(renderer->core);
+	}
+
+	if (multiplayer) {
+		cMultiplayerControllerDestroy(multiplayer);
+	}
+	free(renderers);
 
 	mArgumentsDeinit(&args);
 	mCoreConfigFreeOpts(&opts);
-	mCoreConfigDeinit(&renderer.core->config);
-	renderer.core->deinit(renderer.core);
+
+	mStandardLoggerDeinit(&_logger);
 
 	return ret;
 }

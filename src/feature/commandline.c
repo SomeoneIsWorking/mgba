@@ -47,6 +47,7 @@ static const struct option _options[] = {
 	{ "log-level", required_argument, 0, 'l' },
 	{ "savestate", required_argument, 0, 't' },
 	{ "patch",     required_argument, 0, 'p' },
+	{ "split",     required_argument, 0, '\0' },
 	{ "version",   no_argument, 0, '\0' },
 	{ 0, 0, 0, 0 }
 };
@@ -125,6 +126,8 @@ bool mArgumentsParse(struct mArguments* args, int argc, char* const* argv, struc
 		case '\0':
 			if (strcmp(opt->name, "version") == 0) {
 				args->showVersion = true;
+			} else if (strcmp(opt->name, "split") == 0) {
+				args->split = atoi(optarg);
 			} else {
 				for (i = 0; i < nSubparsers; ++i) {
 					if (subparsers[i].parseLong) {
