@@ -118,17 +118,17 @@ struct retro_core_option_v2_definition option_defs_us[] = {
    },
    {
       "mgba_multiplayer_layout",
-      "Multiplayer Layout (Restart)",
+      "Multiplayer Layout",
       NULL,
       "Choose the screen layout for 2-player multiplayer.",
       NULL,
       "video",
       {
-         { "Top/Bottom", NULL },
-         { "Side-by-Side", NULL },
+         { "topbottom", "Top/Bottom" },
+         { "sidebyside", "Side-by-Side" },
          { NULL, NULL },
       },
-      "Top/Bottom"
+      "topbottom"
    },
    {
       "mgba_use_bios",
