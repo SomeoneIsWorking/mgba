@@ -117,6 +117,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "Disabled"
    },
    {
+      "mgba_multiplayer_layout",
+      "Multiplayer Layout (Restart)",
+      NULL,
+      "Choose the screen layout for 2-player multiplayer.",
+      NULL,
+      "video",
+      {
+         { "Top/Bottom", NULL },
+         { "Side-by-Side", NULL },
+         { NULL, NULL },
+      },
+      "Top/Bottom"
+   },
+   {
       "mgba_use_bios",
       "Use BIOS File if Found (Restart)",
       NULL,

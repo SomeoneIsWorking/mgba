@@ -62,6 +62,11 @@ static unsigned targetSampleRate = GBA_RESAMPLED_RATE;
 
 #define MAX_PLAYERS 4
 static int numCores = 1;
+enum MultiplayerLayout {
+    MULTIPLAYER_LAYOUT_TOP_BOTTOM = 0,
+    MULTIPLAYER_LAYOUT_SIDE_BY_SIDE,
+};
+static enum MultiplayerLayout multiplayerLayout = MULTIPLAYER_LAYOUT_TOP_BOTTOM;
 static struct CoreController controllers[MAX_PLAYERS];
 static struct MultiplayerController multiplayer;
 static struct mCore* core;
@@ -1395,7 +1400,8 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	info->geometry.base_height = height;
 
 	if (numCores == 2) {
-		info->geometry.base_height *= 2;
+		if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) info->geometry.base_width *= 2;
+		else info->geometry.base_height *= 2;
 	} else if (numCores == 4) {
 		info->geometry.base_width *= 2;
 		info->geometry.base_height *= 2;
@@ -1406,7 +1412,8 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	info->geometry.max_height = height;
 
 	if (numCores == 2) {
-		info->geometry.max_height *= 2;
+		if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) info->geometry.max_width *= 2;
+		else info->geometry.max_height *= 2;
 	} else if (numCores == 4) {
 		info->geometry.max_width *= 2;
 		info->geometry.max_height *= 2;
@@ -1702,7 +1709,10 @@ void retro_run(void) {
 	core->currentVideoSize(core, &width, &height);
 	unsigned outWidth = width;
 	unsigned outHeight = height;
-	if (numCores == 2) outHeight *= 2;
+	if (numCores == 2) {
+		if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) outWidth *= 2;
+		else outHeight *= 2;
+	}
 	else if (numCores == 4) { outWidth *= 2; outHeight *= 2; }
 
 	/* If using 'Fixed Interval' frameskipping, check
@@ -2064,6 +2074,12 @@ bool retro_load_game(const struct retro_game_info* game) {
 		else if (strcmp(var.value, "4 Players") == 0) numCores = 4;
 	}
 
+	var.key = "mgba_multiplayer_layout";
+	multiplayerLayout = MULTIPLAYER_LAYOUT_TOP_BOTTOM;
+	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+		if (strcmp(var.value, "Side-by-Side") == 0) multiplayerLayout = MULTIPLAYER_LAYOUT_SIDE_BY_SIDE;
+	}
+
 	MultiplayerControllerInit(&multiplayer);
 
 	for (int i = 0; i < numCores; ++i) {
@@ -2089,8 +2105,10 @@ bool retro_load_game(const struct retro_game_info* game) {
 	unsigned width, height;
 	core->currentVideoSize(core, &width, &height);
 	size_t videoBufferSize = width * height * sizeof(mColor);
-	if (numCores == 2) videoBufferSize *= 2;
-	else if (numCores == 4) videoBufferSize *= 4;
+	if (numCores == 2) {
+		if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) videoBufferSize = (width * 2) * height * sizeof(mColor);
+		else videoBufferSize = width * (height * 2) * sizeof(mColor);
+	} else if (numCores == 4) videoBufferSize = (width * 2) * (height * 2) * sizeof(mColor);
 
 #ifdef _3DS
 	outputBuffer = linearMemAlign(videoBufferSize, 0x80);
@@ -2103,7 +2121,12 @@ bool retro_load_game(const struct retro_game_info* game) {
 		void* buffer = outputBuffer;
 		unsigned stride = width;
 		if (numCores == 2) {
-			if (i == 1) buffer = (uint8_t*)outputBuffer + width * height * sizeof(mColor);
+			if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) {
+				stride = width * 2;
+				if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
+			} else {
+				if (i == 1) buffer = (uint8_t*)outputBuffer + width * height * sizeof(mColor);
+			}
 		} else if (numCores == 4) {
 			stride = width * 2;
 			if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
