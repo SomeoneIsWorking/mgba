@@ -1811,6 +1811,10 @@ void retro_run(void) {
 		struct mAudioBuffer *coreBuffer = c->getAudioBuffer(c);
 		int coreSamplesAvail = mAudioBufferAvailable(coreBuffer);
 		if (coreSamplesAvail > 0) {
+			if (p > 0) {
+				mAudioBufferClear(coreBuffer);
+				continue;
+			}
 			unsigned coreSampleRate = c->audioSampleRate(c);
 			size_t samplesProduced;
 			if (coreSampleRate != targetSampleRate) {
