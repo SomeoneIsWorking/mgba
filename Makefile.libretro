@@ -87,14 +87,16 @@ ifneq (,$(findstring unix,$(platform)))
    TARGET := $(TARGET_NAME)_libretro.so
    fpic := -fPIC
    SHARED := -shared -Wl,-version-script=link.T
-   DEFINES += -std=c99 -D_GNU_SOURCE -DHAVE_LOCALE
+   DEFINES += -std=c99 -D_GNU_SOURCE -DHAVE_LOCALE -DUSE_PTHREADS
+   LIBS += -lpthread
 
 # Raspberry Pi
 else ifneq (,$(findstring rpi,$(platform)))
    TARGET := $(TARGET_NAME)_libretro.so
    fpic := -fPIC
    SHARED := -shared -Wl,-version-script=link.T
-   DEFINES += -std=c99 -D_GNU_SOURCE -DHAVE_LOCALE
+   DEFINES += -std=c99 -D_GNU_SOURCE -DHAVE_LOCALE -DUSE_PTHREADS
+   LIBS += -lpthread
    LDFLAGS += -flto 
    HAVE_VFS_FD = 0
    CFLAGS += -fomit-frame-pointer -ftree-vectorize -flto
@@ -194,8 +196,8 @@ else ifeq ($(platform), osx)
    ifeq ($(arch),ppc)
       DEFINES += -D__POWERPC__ -D__PPC__ -DMSB_FIRST
    endif
-   DEFINES += -std=gnu99
-	DEFINES += -DHAVE_STRLCPY
+   DEFINES += -std=gnu99 -DUSE_PTHREADS
+	DEFINES += -DHAVE_STRLCPY -DHAVE_LOCALE
    ifeq ($(CROSS_COMPILE),1)
 	TARGET_RULE  = -target $(LIBRETRO_APPLE_PLATFORM) -isysroot $(LIBRETRO_APPLE_ISYSROOT)
 	CFLAGS      += $(TARGET_RULE)
@@ -222,7 +224,7 @@ else ifneq (,$(findstring ios,$(platform)))
       CC += -miphoneos-version-min=5.0
       PLATFORM_DEFINES := -miphoneos-version-min=5.0
    endif
-   DEFINES += -std=c99
+   DEFINES += -std=c99 -DUSE_PTHREADS
    DEFINES += -DHAVE_STRLCPY
 
 # tvOS
@@ -231,7 +233,7 @@ else ifeq ($(platform), tvos-arm64)
    fpic := -fPIC
    SHARED := -dynamiclib
    CFLAGS := -DIOS
-   DEFINES += -std=c99
+   DEFINES += -std=c99 -DUSE_PTHREADS
    DEFINES += -DHAVE_STRLCPY
 
 ifeq ($(IOSSDK),)
@@ -436,7 +438,7 @@ else
    CFLAGS += -O3
 endif
 
-DEFINES += -DHAVE_STRNDUP -DHAVE_STRDUP -DDISABLE_THREADING -DMINIMAL_CORE=2
+DEFINES += -DHAVE_STRNDUP -DHAVE_STRDUP -DMINIMAL_CORE=2
 
 include $(BUILD_DIR)/Makefile.common
 

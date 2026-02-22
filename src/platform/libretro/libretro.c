@@ -7,10 +7,14 @@
 
 #include <mgba-util/common.h>
 
+#include "core_controller.h"
+#include "multiplayer_controller.h"
+
 #include <mgba/core/cheats.h>
 #include <mgba/core/core.h>
 #include <mgba/core/log.h>
 #include <mgba/core/serialize.h>
+#include <mgba/core/thread.h>
 #include <mgba/core/version.h>
 #include <mgba-util/audio-buffer.h>
 #include <mgba-util/audio-resampler.h>
@@ -56,6 +60,12 @@ static unsigned targetSampleRate = GBA_RESAMPLED_RATE;
 #define VIDEO_HEIGHT_MAX 224
 #define VIDEO_BUFF_SIZE  (VIDEO_WIDTH_MAX * VIDEO_HEIGHT_MAX * sizeof(mColor))
 
+#define MAX_PLAYERS 4
+static int numCores = 1;
+static struct CoreController controllers[MAX_PLAYERS];
+static struct MultiplayerController multiplayer;
+static struct mCore* core;
+
 static retro_environment_t environCallback;
 static retro_video_refresh_t videoCallback;
 static retro_audio_sample_batch_t audioCallback;
@@ -84,8 +94,8 @@ static int32_t _readTiltX(struct mRotationSource* source);
 static int32_t _readTiltY(struct mRotationSource* source);
 static int32_t _readGyroZ(struct mRotationSource* source);
 static void _setupMaps(struct mCore* core);
+static void _onFrameDone(struct mCoreThread* context);
 
-static struct mCore* core;
 static mColor* outputBuffer = NULL;
 struct mAudioBuffer audioResampleBuffer;
 struct mAudioResampler audioResampler;
@@ -100,6 +110,24 @@ static bool rumbleInitDone;
 static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
 static struct mRotationSource rotation;
+
+static volatile int framesExecuted[MAX_PLAYERS] = {0, 0, 0, 0};
+static Mutex runMutex;
+static Condition runCond;
+
+static void _onFrameDone(struct mCoreThread* context) {
+	struct CoreController* cc = (struct CoreController*) context->userData;
+	for (int i = 0; i < numCores; ++i) {
+		if (&controllers[i] == cc) {
+			MutexLock(&runMutex);
+			framesExecuted[i]++;
+			ConditionWake(&runCond);
+			MutexUnlock(&runMutex);
+			break;
+		}
+	}
+}
+
 static bool tiltEnabled;
 static bool gyroEnabled;
 static int luxLevelIndex;
@@ -1276,16 +1304,22 @@ static void _doDeferredSetup(void) {
 	struct VFile* save = VFileFromMemory(savedata, GBA_SIZE_FLASH1M);
 
     /* need to defer resetting the core on start so drivers are initialized */
-    core->reset(core);
+	for (int i = 0; i < numCores; ++i) {
+		controllers[i].core->reset(controllers[i].core);
+	}
 	_setupMaps(core);
 
 #if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
 	_loadPostProcessingSettings();
 #endif
 
-	if (!core->loadSave(core, save)) {
-		save->close(save);
+	for (int i = 0; i < numCores; ++i) {
+		struct VFile* s = VFileFromMemory(savedata, GBA_SIZE_FLASH1M);
+		if (!controllers[i].core->loadSave(controllers[i].core, s)) {
+			s->close(s);
+		}
 	}
+	save->close(save);
 	deferredSetup = false;
 }
 
@@ -1359,11 +1393,25 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	info->geometry.base_width = width;
 	info->geometry.base_height = height;
 
+	if (numCores == 2) {
+		info->geometry.base_height *= 2;
+	} else if (numCores == 4) {
+		info->geometry.base_width *= 2;
+		info->geometry.base_height *= 2;
+	}
+
 	core->baseVideoSize(core, &width, &height);
 	info->geometry.max_width = width;
 	info->geometry.max_height = height;
 
-	info->geometry.aspect_ratio = width / (double) height;
+	if (numCores == 2) {
+		info->geometry.max_height *= 2;
+	} else if (numCores == 4) {
+		info->geometry.max_width *= 2;
+		info->geometry.max_height *= 2;
+	}
+
+	info->geometry.aspect_ratio = info->geometry.base_width / (double) info->geometry.base_height;
 	info->timing.fps = core->frequency(core) / (float) core->frameCycles(core);
 
 #ifdef M_CORE_GBA
@@ -1473,9 +1521,14 @@ void retro_init(void) {
 	retroAudioLatency       = 0;
 	updateAudioLatency      = false;
 	updateAudioRate         = false;
+
+	MutexInit(&runMutex);
+	ConditionInit(&runCond);
 }
 
 void retro_deinit(void) {
+	MutexDeinit(&runMutex);
+	ConditionDeinit(&runCond);
 	if (outputBuffer) {
 #ifdef _3DS
 		linearFree(outputBuffer);
@@ -1517,175 +1570,135 @@ void retro_deinit(void) {
 	audioLowPassRightPrev = 0;
 }
 
-static int turboclock = 0;
-static bool indownstate = true;
+static int turboclock_p[MAX_PLAYERS] = {0};
+static bool indownstate_p[MAX_PLAYERS] = {true, true, true, true};
 
-int16_t cycleturbo(bool a, bool b, bool l, bool r) {
+int16_t cycleturbo_p(int p, bool a, bool b, bool l, bool r) {
 	int16_t buttons = 0;
-	turboclock++;
-	if (turboclock >= 2) {
-		turboclock = 0;
-		indownstate = !indownstate;
+	turboclock_p[p]++;
+	if (turboclock_p[p] >= 2) {
+		turboclock_p[p] = 0;
+		indownstate_p[p] = !indownstate_p[p];
 	}
 
 	if (a) {
-		buttons |= indownstate << 0;
+		buttons |= indownstate_p[p] << 0;
 	}
 
 	if (b) {
-		buttons |= indownstate << 1;
+		buttons |= indownstate_p[p] << 1;
 	}
 
 	if (l) {
-		buttons |= indownstate << 9;
+		buttons |= indownstate_p[p] << 9;
 	}
 
 	if (r) {
-		buttons |= indownstate << 8;
+		buttons |= indownstate_p[p] << 8;
 	}
 
 	return buttons;
+}
+
+int16_t cycleturbo(bool a, bool b, bool l, bool r) {
+	return cycleturbo_p(0, a, b, l, r);
 }
 
 void retro_run(void) {
 	if (deferredSetup) {
 		_doDeferredSetup();
 	}
-	uint16_t keys;
+
+	uint16_t playerKeys = 0;
 	bool skipFrame = false;
 
-	inputPollCallback();
-
-	bool updated = false;
-	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
-		envVarsUpdated = true;
-
-		struct retro_variable var = {
-			.key = "mgba_allow_opposing_directions",
-			.value = 0
-		};
-		if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-			mCoreConfigSetIntValue(&core->config, "allowOpposingDirections", strcmp(var.value, "yes") == 0);
-			core->reloadConfigOption(core, "allowOpposingDirections", NULL);
-		}
-
-		_loadFrameskipSettings(NULL);
-		_loadAudioLowPassFilterSettings();
-
-#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
-		_loadPostProcessingSettings();
-#endif
-#ifdef M_CORE_GB
-		_updateGbPal();
-#endif
-	}
-
-	keys = 0;
-	int i;
-	if (useBitmasks) {
-		int16_t joypadMask = inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
-		for (i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
-			keys |= ((joypadMask >> keymap[i]) & 1) << i;
-		}
-		// XXX: turbo keys, should be moved to frontend
-#define JOYPAD_BIT(BUTTON) (1 << RETRO_DEVICE_ID_JOYPAD_ ## BUTTON)
-		keys |= cycleturbo(joypadMask & JOYPAD_BIT(X), joypadMask & JOYPAD_BIT(Y), joypadMask & JOYPAD_BIT(L2), joypadMask & JOYPAD_BIT(R2));
-#undef JOYPAD_BIT
-	} else {
-		for (i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
-			keys |= (!!inputCallback(0, RETRO_DEVICE_JOYPAD, 0, keymap[i])) << i;
-		}
-		// XXX: turbo keys, should be moved to frontend
-		keys |= cycleturbo(
-			inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X),
-			inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y),
-			inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2),
-			inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2)
-		);
-	}
-
-	core->setKeys(core, keys);
-
-	if (!luxSensorUsed) {
-		static bool wasAdjustingLux = false;
-		if (wasAdjustingLux) {
-			wasAdjustingLux = inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3) ||
-			                  inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3);
-		} else {
-			if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3)) {
-				++luxLevelIndex;
-				if (luxLevelIndex > 10) {
-					luxLevelIndex = 10;
+	if (numCores > 1) {
+		inputPollCallback();
+		for (int p = 0; p < numCores; ++p) {
+			playerKeys = 0;
+			if (useBitmasks) {
+				int16_t joypadMask = inputCallback(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+				for (int i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
+					playerKeys |= ((joypadMask >> keymap[i]) & 1) << i;
 				}
-				wasAdjustingLux = true;
-			} else if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3)) {
-				--luxLevelIndex;
-				if (luxLevelIndex < 0) {
-					luxLevelIndex = 0;
-				}
-				wasAdjustingLux = true;
-			}
-		}
-	}
-
-	/* Check whether current frame should
-	 * be skipped */
-	if ((frameskipType > 0)  &&
-		 (frameskipType != 3) && /* Ignore 'Fixed Interval' - handled internally */
-		 retroAudioBuffActive) {
-
-		switch (frameskipType) {
-			case 1: /* Auto */
-				skipFrame = retroAudioBuffUnderrun;
-				break;
-			case 2: /* Auto (Threshold) */
-				skipFrame = (retroAudioBuffOccupancy < frameskipThreshold);
-				break;
-			default:
-				skipFrame = false;
-				break;
-		}
-
-		if (skipFrame) {
-			if(frameskipCounter < RETRO_FRAMESKIP_MAX) {
-
-				switch (core->platform(core)) {
-#ifdef M_CORE_GBA
-				case mPLATFORM_GBA:
-					((struct GBA*) core->board)->video.frameskipCounter = 1;
-					break;
-#endif
-#ifdef M_CORE_GB
-				case mPLATFORM_GB:
-					((struct GB*) core->board)->video.frameskipCounter = 1;
-					break;
-#endif
-				default:
-					break;
-				}
-				frameskipCounter++;
-
+	#define JOYPAD_BIT(BUTTON) (1 << RETRO_DEVICE_ID_JOYPAD_ ## BUTTON)
+				playerKeys |= cycleturbo_p(p, joypadMask & JOYPAD_BIT(X), joypadMask & JOYPAD_BIT(Y), joypadMask & JOYPAD_BIT(L2), joypadMask & JOYPAD_BIT(R2));
+	#undef JOYPAD_BIT
 			} else {
-				frameskipCounter = 0;
-				skipFrame        = false;
+				for (int i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
+					playerKeys |= (!!inputCallback(p, RETRO_DEVICE_JOYPAD, 0, keymap[i])) << i;
+				}
+				playerKeys |= cycleturbo_p(p,
+					inputCallback(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X),
+					inputCallback(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y),
+					inputCallback(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2),
+					inputCallback(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2)
+				);
 			}
-		} else {
-			frameskipCounter = 0;
+			controllers[p].core->setKeys(controllers[p].core, playerKeys);
 		}
+
+		int target[MAX_PLAYERS];
+		MutexLock(&runMutex);
+		for (int i = 0; i < numCores; ++i) {
+			target[i] = framesExecuted[i] + 1;
+		}
+		MutexUnlock(&runMutex);
+
+		for (int i = 0; i < numCores; ++i) {
+			mCoreThreadUnpause(&controllers[i].threadContext);
+		}
+
+		MutexLock(&runMutex);
+		while (true) {
+			bool allDone = true;
+			for (int i = 0; i < numCores; ++i) {
+				if (framesExecuted[i] < target[i]) {
+					allDone = false;
+					break;
+				}
+			}
+			if (allDone) break;
+			ConditionWait(&runCond, &runMutex);
+		}
+		MutexUnlock(&runMutex);
+
+		for (int i = 0; i < numCores; ++i) {
+			mCoreThreadPause(&controllers[i].threadContext);
+		}
+	} else {
+		// Single player, keep original logic for performance
+		playerKeys = 0;
+		inputPollCallback();
+		if (useBitmasks) {
+			int16_t joypadMask = inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+			for (int i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
+				playerKeys |= ((joypadMask >> keymap[i]) & 1) << i;
+			}
+#define JOYPAD_BIT(BUTTON) (1 << RETRO_DEVICE_ID_JOYPAD_ ## BUTTON)
+			playerKeys |= cycleturbo(joypadMask & JOYPAD_BIT(X), joypadMask & JOYPAD_BIT(Y), joypadMask & JOYPAD_BIT(L2), joypadMask & JOYPAD_BIT(R2));
+#undef JOYPAD_BIT
+		} else {
+			for (int i = 0; i < sizeof(keymap) / sizeof(*keymap); ++i) {
+				playerKeys |= (!!inputCallback(0, RETRO_DEVICE_JOYPAD, 0, keymap[i])) << i;
+			}
+			playerKeys |= cycleturbo(
+				inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X),
+				inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y),
+				inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2),
+				inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2)
+			);
+		}
+		core->setKeys(core, playerKeys);
+		core->runFrame(core);
 	}
 
-   /* If frameskip settings have changed, update
-    * frontend audio latency */
-   if (updateAudioLatency)
-   {
-      environCallback(RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY,
-            &retroAudioLatency);
-      updateAudioLatency = false;
-   }
-
-	core->runFrame(core);
 	unsigned width, height;
 	core->currentVideoSize(core, &width, &height);
+	unsigned outWidth = width;
+	unsigned outHeight = height;
+	if (numCores == 2) outHeight *= 2;
+	else if (numCores == 4) { outWidth *= 2; outHeight *= 2; }
 
 	/* If using 'Fixed Interval' frameskipping, check
 	 * whether a frame is currently available  */
@@ -1709,13 +1722,15 @@ void retro_run(void) {
 	if (!skipFrame) {
 #if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
 		if (videoPostProcess) {
-			videoPostProcess(width, height);
-			videoCallback(ppOutputBuffer, width, height, VIDEO_WIDTH_MAX * sizeof(mColor));
+			videoPostProcess(outWidth, outHeight);
+			videoCallback(ppOutputBuffer, outWidth, outHeight, outWidth * sizeof(mColor));
 		} else
 #endif
-			videoCallback(outputBuffer, width, height, VIDEO_WIDTH_MAX * sizeof(mColor));
+		{
+			videoCallback(outputBuffer, outWidth, outHeight, outWidth * sizeof(mColor));
+		}
 	} else {
-		videoCallback(NULL, width, height, VIDEO_WIDTH_MAX * sizeof(mColor));
+		videoCallback(NULL, outWidth, outHeight, outWidth * sizeof(mColor));
 	}
 
 	/* Check whether audio sample rate has changed */
@@ -1727,29 +1742,32 @@ void retro_run(void) {
 	}
 
 #ifdef M_CORE_GBA
-	if (core->platform(core) == mPLATFORM_GBA) {
-		struct mAudioBuffer *coreBuffer = core->getAudioBuffer(core);
-        int coreSamplesAvail = mAudioBufferAvailable(coreBuffer);
-        if (coreSamplesAvail > 0) {
-            unsigned coreSampleRate = core->audioSampleRate(core);
-            size_t samplesProduced;
-            if (coreSampleRate != targetSampleRate) {
-                /* Resample generated audio */
-                mAudioResamplerSetSource(&audioResampler, coreBuffer, coreSampleRate, true);
-                mAudioResamplerProcess(&audioResampler);
-                /* Output resampled audio */
-                size_t samplesAvail = mAudioBufferAvailable(&audioResampleBuffer);
-                samplesProduced = mAudioBufferRead(&audioResampleBuffer, audioSampleBuffer, samplesAvail);
-            } else {
-                samplesProduced = mAudioBufferRead(coreBuffer, audioSampleBuffer, coreSamplesAvail);
-            }
-            if (samplesProduced > 0) {
-                if (audioLowPassEnabled) {
-                    _audioLowPassFilter(audioSampleBuffer, samplesProduced);
-                }
-                audioCallback(audioSampleBuffer, samplesProduced);
-            }
-        }
+	for (int p = 0; p < numCores; ++p) {
+		struct mCore* c = controllers[p].core;
+		if (c->platform(c) == mPLATFORM_GBA) {
+			struct mAudioBuffer *coreBuffer = c->getAudioBuffer(c);
+			int coreSamplesAvail = mAudioBufferAvailable(coreBuffer);
+			if (coreSamplesAvail > 0) {
+				unsigned coreSampleRate = c->audioSampleRate(c);
+				size_t samplesProduced;
+				if (coreSampleRate != targetSampleRate) {
+					/* Resample generated audio */
+					mAudioResamplerSetSource(&audioResampler, coreBuffer, coreSampleRate, true);
+					mAudioResamplerProcess(&audioResampler);
+					/* Output resampled audio */
+					size_t samplesAvail = mAudioBufferAvailable(&audioResampleBuffer);
+					samplesProduced = mAudioBufferRead(&audioResampleBuffer, audioSampleBuffer, samplesAvail);
+				} else {
+					samplesProduced = mAudioBufferRead(coreBuffer, audioSampleBuffer, coreSamplesAvail);
+				}
+				if (samplesProduced > 0) {
+					if (audioLowPassEnabled) {
+						_audioLowPassFilter(audioSampleBuffer, samplesProduced);
+					}
+					audioCallback(audioSampleBuffer, samplesProduced);
+				}
+			}
+		}
 	}
 #endif
 }
@@ -2017,22 +2035,72 @@ bool retro_load_game(const struct retro_game_info* game) {
 		return false;
 	}
 
-	core = mCoreFindVF(rom);
-	if (!core) {
-		rom->close(rom);
-		mappedMemoryFree(data, game->size);
-		return false;
+	struct retro_variable var = { "mgba_multiplayer_splitscreen", 0 };
+	numCores = 1;
+	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+		if (strcmp(var.value, "2 Players") == 0) numCores = 2;
+		else if (strcmp(var.value, "4 Players") == 0) numCores = 4;
 	}
-	mCoreInitConfig(core, NULL);
-	core->init(core);
+
+	MultiplayerControllerInit(&multiplayer);
+
+	for (int i = 0; i < numCores; ++i) {
+		struct VFile* coreRom;
+		if (data) {
+			coreRom = VFileFromMemory(data, dataSize);
+		} else {
+			coreRom = VFileOpen(game->path, O_RDONLY);
+		}
+		
+		struct mCore* c = mCoreFindVF(coreRom);
+		if (!c) {
+			coreRom->close(coreRom);
+			return false;
+		}
+		mCoreInitConfig(c, NULL);
+		c->init(c);
+		CoreControllerInit(&controllers[i], c);
+		MultiplayerControllerAttachGame(&multiplayer, &controllers[i]);
+	}
+	core = controllers[0].core;
+
+	unsigned width, height;
+	core->currentVideoSize(core, &width, &height);
+	size_t videoBufferSize = width * height * sizeof(mColor);
+	if (numCores == 2) videoBufferSize *= 2;
+	else if (numCores == 4) videoBufferSize *= 4;
 
 #ifdef _3DS
-	outputBuffer = linearMemAlign(VIDEO_BUFF_SIZE, 0x80);
+	outputBuffer = linearMemAlign(videoBufferSize, 0x80);
 #else
-	outputBuffer = malloc(VIDEO_BUFF_SIZE);
+	outputBuffer = malloc(videoBufferSize);
 #endif
-	memset(outputBuffer, 0xFFFF, VIDEO_BUFF_SIZE);
-	core->setVideoBuffer(core, outputBuffer, VIDEO_WIDTH_MAX);
+	memset(outputBuffer, 0xFFFF, videoBufferSize);
+
+	for (int i = 0; i < numCores; ++i) {
+		void* buffer = outputBuffer;
+		unsigned stride = width;
+		if (numCores == 2) {
+			if (i == 1) buffer = (uint8_t*)outputBuffer + width * height * sizeof(mColor);
+		} else if (numCores == 4) {
+			stride = width * 2;
+			if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
+			else if (i == 2) buffer = (uint8_t*)outputBuffer + width * 2 * height * sizeof(mColor);
+			else if (i == 3) buffer = (uint8_t*)outputBuffer + (width * 2 * height + width) * sizeof(mColor);
+		}
+		controllers[i].core->setVideoBuffer(controllers[i].core, buffer, stride);
+		controllers[i].core->setAVStream(controllers[i].core, &stream);
+		controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_RUMBLE, &rumble);
+		controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_ROTATION, &rotation);
+	}
+
+	if (numCores > 1) {
+		for (int i = 0; i < numCores; ++i) {
+			controllers[i].threadContext.frameCallback = _onFrameDone;
+			CoreControllerStart(&controllers[i]);
+			mCoreThreadPause(&controllers[i].threadContext);
+		}
+	}
 
 #ifdef M_CORE_GBA
 	/* GBA emulation produces a fairly regular number
@@ -2077,15 +2145,27 @@ bool retro_load_game(const struct retro_game_info* game) {
 		core->setAudioBufferSize(core, GB_SAMPLES);
 	}
 
-	core->setAVStream(core, &stream);
-	core->setPeripheral(core, mPERIPH_RUMBLE, &rumble);
-	core->setPeripheral(core, mPERIPH_ROTATION, &rotation);
+	for (int i = 0; i < numCores; ++i) {
+		struct mCore* c = controllers[i].core;
+		c->setAVStream(c, &stream);
+		c->setPeripheral(c, mPERIPH_RUMBLE, &rumble);
+		c->setPeripheral(c, mPERIPH_ROTATION, &rotation);
+	}
 
 	savedata = anonymousMemoryMap(GBA_SIZE_FLASH1M);
 	memset(savedata, 0xFF, GBA_SIZE_FLASH1M);
 
 	_reloadSettings();
-	core->loadROM(core, rom);
+
+	for (int i = 0; i < numCores; ++i) {
+		struct VFile* coreRom;
+		if (data) {
+			coreRom = VFileFromMemory(data, dataSize);
+		} else {
+			coreRom = VFileOpen(game->path, O_RDONLY);
+		}
+		controllers[i].core->loadROM(controllers[i].core, coreRom);
+	}
 	deferredSetup = true;
 
 	const char* sysDir = 0;
@@ -2095,7 +2175,9 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 #ifdef M_CORE_GBA
 	if (core->platform(core) == mPLATFORM_GBA) {
-		core->setPeripheral(core, mPERIPH_GBA_LUMINANCE, &lux);
+		for (int i = 0; i < numCores; ++i) {
+			controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_GBA_LUMINANCE, &lux);
+		}
 		biosName = "gba_bios.bin";
 	}
 #endif
@@ -2140,9 +2222,11 @@ bool retro_load_game(const struct retro_game_info* game) {
 #ifdef ENABLE_VFS
 	if (core->opts.useBios && sysDir && biosName) {
 		snprintf(biosPath, sizeof(biosPath), "%s%s%s", sysDir, PATH_SEP, biosName);
-		struct VFile* bios = VFileOpen(biosPath, O_RDONLY);
-		if (bios) {
-			core->loadBIOS(core, bios, 0);
+		for (int i = 0; i < numCores; ++i) {
+			struct VFile* bios = VFileOpen(biosPath, O_RDONLY);
+			if (bios) {
+				controllers[i].core->loadBIOS(controllers[i].core, bios, 0);
+			}
 		}
 	}
 #endif
@@ -2154,8 +2238,16 @@ void retro_unload_game(void) {
 	if (!core) {
 		return;
 	}
-	mCoreConfigDeinit(&core->config);
-	core->deinit(core);
+	for (int i = 0; i < numCores; ++i) {
+		if (controllers[i].hasStarted) {
+			CoreControllerStop(&controllers[i]);
+		}
+		mCoreConfigDeinit(&controllers[i].core->config);
+		controllers[i].core->deinit(controllers[i].core);
+	}
+	MultiplayerControllerDeinit(&multiplayer);
+	numCores = 1;
+	core = NULL;
 	mappedMemoryFree(data, dataSize);
 	data = 0;
 	mappedMemoryFree(savedata, GBA_SIZE_FLASH1M);
