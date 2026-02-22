@@ -13,6 +13,7 @@ struct CoreController {
     bool isPaused;
     bool hasStarted;
     void* userData;
+    struct MultiplayerController* multiplayer;
 };
 
 void CoreControllerInit(struct CoreController* controller, struct mCore* core);
