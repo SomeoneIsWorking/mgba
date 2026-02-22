@@ -46,12 +46,17 @@ void MultiplayerControllerDeinit(MultiplayerController* controller) {
     MutexDeinit(&controller->lockstepMutex);
 }
 
+static void _onFrameDoneMult(struct mCoreThread* context) {
+    mCoreThreadPauseFromThread(context);
+}
+
 bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct CoreController* game) {
     if (controller->attached >= MAX_PLAYERS) {
         return false;
     }
 
     game->multiplayer = controller;
+    game->threadContext.frameCallback = _onFrameDoneMult;
 
     if (controller->platform == mPLATFORM_NONE) {
         controller->platform = game->core->platform(game->core);
@@ -137,34 +142,23 @@ void MultiplayerControllerRunFrame(MultiplayerController* controller) {
         struct CoreController* cc = controller->players[i];
         if (!cc) continue;
         struct mCoreThread* thread = &cc->threadContext;
-        struct mCoreSync* sync = &thread->impl->sync;
-
-        if (mCoreThreadIsPaused(thread)) {
-            mCoreThreadUnpause(thread);
-        }
-
-        MutexLock(&sync->videoFrameMutex);
-        sync->videoFramePending = 0;
-        // Only the first core blocks at the end of its frame.
-        // This avoids deadlocks during hardware link handshakes at the end of frames.
-        sync->videoFrameWait = (i == 0);
-        ConditionWake(&sync->videoFrameRequiredCond);
-        MutexUnlock(&sync->videoFrameMutex);
+        
+        mCoreThreadUnpause(thread);
     }
 }
 
 void MultiplayerControllerWaitFrame(MultiplayerController* controller) {
-    if (controller->attached == 0 || !controller->players[0]) return;
+    if (controller->attached == 0) return;
 
-    // We only wait for the first player to finish its frame.
-    // Lockstep will naturally throttle the others to its speed.
-    struct CoreController* cc = controller->players[0];
-    struct mCoreThread* thread = &cc->threadContext;
-    struct mCoreSync* sync = &thread->impl->sync;
+    for (int i = 0; i < controller->attached; ++i) {
+        struct CoreController* cc = controller->players[i];
+        if (!cc) continue;
+        struct mCoreThread* thread = &cc->threadContext;
 
-    MutexLock(&sync->videoFrameMutex);
-    while (sync->videoFramePending == 0 && mCoreThreadIsActive(thread)) {
-        ConditionWait(&sync->videoFrameAvailableCond, &sync->videoFrameMutex);
+        MutexLock(&thread->impl->stateMutex);
+        while (thread->impl->state != mTHREAD_PAUSED && mCoreThreadIsActive(thread)) {
+            ConditionWait(&thread->impl->stateOffThreadCond, &thread->impl->stateMutex);
+        }
+        MutexUnlock(&thread->impl->stateMutex);
     }
-    MutexUnlock(&sync->videoFrameMutex);
 }
