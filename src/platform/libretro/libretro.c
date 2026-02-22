@@ -100,6 +100,7 @@ static int32_t _readTiltY(struct mRotationSource* source);
 static int32_t _readGyroZ(struct mRotationSource* source);
 static void _setupMaps(struct mCore* core);
 static void _onFrameDone(struct mCoreThread* context);
+static void _updateMultiplayerLayout(void);
 
 static mColor* outputBuffer = NULL;
 struct mAudioBuffer audioResampleBuffer;
@@ -132,6 +133,36 @@ static void _onFrameDone(struct mCoreThread* context) {
 			break;
 		}
 	}
+}
+
+static void _updateMultiplayerLayout(void) {
+	if (!core) return;
+
+	unsigned width, height;
+	core->currentVideoSize(core, &width, &height);
+
+	for (int i = 0; i < numCores; ++i) {
+		void* buffer = outputBuffer;
+		unsigned stride = width;
+		if (numCores == 2) {
+			if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) {
+				stride = width * 2;
+				if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
+			} else {
+				if (i == 1) buffer = (uint8_t*)outputBuffer + width * height * sizeof(mColor);
+			}
+		} else if (numCores == 4) {
+			stride = width * 2;
+			if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
+			else if (i == 2) buffer = (uint8_t*)outputBuffer + width * 2 * height * sizeof(mColor);
+			else if (i == 3) buffer = (uint8_t*)outputBuffer + (width * 2 * height + width) * sizeof(mColor);
+		}
+		controllers[i].core->setVideoBuffer(controllers[i].core, buffer, stride);
+	}
+
+	struct retro_system_av_info info;
+	retro_get_system_av_info(&info);
+	environCallback(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &info);
 }
 
 static bool tiltEnabled;
@@ -1621,6 +1652,20 @@ void retro_run(void) {
 		_doDeferredSetup();
 	}
 
+	bool optionsUpdated = false;
+	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &optionsUpdated) && optionsUpdated) {
+		struct retro_variable var = { "mgba_multiplayer_layout", 0 };
+		if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+			enum MultiplayerLayout lastLayout = multiplayerLayout;
+			if (strcmp(var.value, "sidebyside") == 0) multiplayerLayout = MULTIPLAYER_LAYOUT_SIDE_BY_SIDE;
+			else multiplayerLayout = MULTIPLAYER_LAYOUT_TOP_BOTTOM;
+
+			if (multiplayerLayout != lastLayout) {
+				_updateMultiplayerLayout();
+			}
+		}
+	}
+
 	uint16_t playerKeys = 0;
 	bool skipFrame = false;
 
@@ -2077,7 +2122,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	var.key = "mgba_multiplayer_layout";
 	multiplayerLayout = MULTIPLAYER_LAYOUT_TOP_BOTTOM;
 	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-		if (strcmp(var.value, "Side-by-Side") == 0) multiplayerLayout = MULTIPLAYER_LAYOUT_SIDE_BY_SIDE;
+		if (strcmp(var.value, "sidebyside") == 0) multiplayerLayout = MULTIPLAYER_LAYOUT_SIDE_BY_SIDE;
 	}
 
 	MultiplayerControllerInit(&multiplayer);
@@ -2105,10 +2150,8 @@ bool retro_load_game(const struct retro_game_info* game) {
 	unsigned width, height;
 	core->currentVideoSize(core, &width, &height);
 	size_t videoBufferSize = width * height * sizeof(mColor);
-	if (numCores == 2) {
-		if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) videoBufferSize = (width * 2) * height * sizeof(mColor);
-		else videoBufferSize = width * (height * 2) * sizeof(mColor);
-	} else if (numCores == 4) videoBufferSize = (width * 2) * (height * 2) * sizeof(mColor);
+	if (numCores == 2) videoBufferSize = (width * 2) * (height * 2) * sizeof(mColor); // Large enough for either layout
+	else if (numCores == 4) videoBufferSize = (width * 2) * (height * 2) * sizeof(mColor);
 
 #ifdef _3DS
 	outputBuffer = linearMemAlign(videoBufferSize, 0x80);
@@ -2117,23 +2160,9 @@ bool retro_load_game(const struct retro_game_info* game) {
 #endif
 	memset(outputBuffer, 0xFFFF, videoBufferSize);
 
+	_updateMultiplayerLayout();
+
 	for (int i = 0; i < numCores; ++i) {
-		void* buffer = outputBuffer;
-		unsigned stride = width;
-		if (numCores == 2) {
-			if (multiplayerLayout == MULTIPLAYER_LAYOUT_SIDE_BY_SIDE) {
-				stride = width * 2;
-				if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
-			} else {
-				if (i == 1) buffer = (uint8_t*)outputBuffer + width * height * sizeof(mColor);
-			}
-		} else if (numCores == 4) {
-			stride = width * 2;
-			if (i == 1) buffer = (uint8_t*)outputBuffer + width * sizeof(mColor);
-			else if (i == 2) buffer = (uint8_t*)outputBuffer + width * 2 * height * sizeof(mColor);
-			else if (i == 3) buffer = (uint8_t*)outputBuffer + (width * 2 * height + width) * sizeof(mColor);
-		}
-		controllers[i].core->setVideoBuffer(controllers[i].core, buffer, stride);
 		controllers[i].core->setAVStream(controllers[i].core, &stream);
 		controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_RUMBLE, &rumble);
 		controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_ROTATION, &rotation);
