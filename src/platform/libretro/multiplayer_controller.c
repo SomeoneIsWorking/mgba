@@ -80,3 +80,32 @@ bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct C
     controller->attached++;
     return true;
 }
+
+void MultiplayerControllerDetachGame(MultiplayerController* controller, struct CoreController* game) {
+    int pid = -1;
+    for (int i = 0; i < controller->attached; ++i) {
+        if (controller->players[i] == game) {
+            pid = i;
+            break;
+        }
+    }
+
+    if (pid == -1) {
+        return;
+    }
+
+    if (controller->platform == mPLATFORM_GBA) {
+#ifdef M_CORE_GBA
+        struct GBASIOLockstepDriver* driver = &controller->gbaDrivers[pid];
+        GBASIOLockstepCoordinatorDetach(&controller->gbaCoordinator, driver);
+#endif
+    } else if (controller->platform == mPLATFORM_GB) {
+#ifdef M_CORE_GB
+        struct GBSIOLockstepNode* node = &controller->gbNodes[pid];
+        GBSIOLockstepDetachNode(&controller->gbLockstep, node);
+#endif
+    }
+
+    controller->players[pid] = NULL;
+    // We don't shift players here because pid corresponds to indices in gbaDrivers/gbNodes.
+}

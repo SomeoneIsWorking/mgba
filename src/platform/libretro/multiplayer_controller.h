@@ -38,5 +38,6 @@ typedef struct MultiplayerController {
 void MultiplayerControllerInit(MultiplayerController* controller);
 void MultiplayerControllerDeinit(MultiplayerController* controller);
 bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct CoreController* game);
+void MultiplayerControllerDetachGame(MultiplayerController* controller, struct CoreController* game);
 
 #endif
