@@ -102,6 +102,21 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "Autodetect"
    },
    {
+      "mgba_multiplayer_splitscreen",
+      "Splitscreen Multiplayer (Restart)",
+      NULL,
+      "Enables splitscreen multiplayer with multiple cores.",
+      NULL,
+      "system",
+      {
+         { "Disabled", NULL },
+         { "2 Players", NULL },
+         { "4 Players", NULL },
+         { NULL, NULL },
+      },
+      "Disabled"
+   },
+   {
       "mgba_use_bios",
       "Use BIOS File if Found (Restart)",
       NULL,
