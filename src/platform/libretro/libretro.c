@@ -100,6 +100,7 @@ static mColor* outputBuffer = NULL;
 struct mAudioBuffer audioResampleBuffer;
 struct mAudioResampler audioResampler;
 static int16_t *audioSampleBuffer = NULL;
+static int32_t *audioMixBuffer = NULL;
 static size_t audioSampleBufferSize;
 static void* data;
 static size_t dataSize;
@@ -1548,6 +1549,10 @@ void retro_deinit(void) {
 		free(audioSampleBuffer);
 		audioSampleBuffer = NULL;
 	}
+	if (audioMixBuffer) {
+		free(audioMixBuffer);
+		audioMixBuffer = NULL;
+	}
 	audioSampleBufferSize = 0;
 
 	if (sensorStateCallback) {
@@ -1741,35 +1746,50 @@ void retro_run(void) {
 		updateAudioRate = false;
 	}
 
-#ifdef M_CORE_GBA
+	size_t maxSamplesProduced = 0;
+	if (audioMixBuffer) {
+		memset(audioMixBuffer, 0, audioSampleBufferSize * sizeof(int32_t));
+	}
+
 	for (int p = 0; p < numCores; ++p) {
 		struct mCore* c = controllers[p].core;
-		if (c->platform(c) == mPLATFORM_GBA) {
-			struct mAudioBuffer *coreBuffer = c->getAudioBuffer(c);
-			int coreSamplesAvail = mAudioBufferAvailable(coreBuffer);
-			if (coreSamplesAvail > 0) {
-				unsigned coreSampleRate = c->audioSampleRate(c);
-				size_t samplesProduced;
-				if (coreSampleRate != targetSampleRate) {
-					/* Resample generated audio */
-					mAudioResamplerSetSource(&audioResampler, coreBuffer, coreSampleRate, true);
-					mAudioResamplerProcess(&audioResampler);
-					/* Output resampled audio */
-					size_t samplesAvail = mAudioBufferAvailable(&audioResampleBuffer);
-					samplesProduced = mAudioBufferRead(&audioResampleBuffer, audioSampleBuffer, samplesAvail);
-				} else {
-					samplesProduced = mAudioBufferRead(coreBuffer, audioSampleBuffer, coreSamplesAvail);
+		struct mAudioBuffer *coreBuffer = c->getAudioBuffer(c);
+		int coreSamplesAvail = mAudioBufferAvailable(coreBuffer);
+		if (coreSamplesAvail > 0) {
+			unsigned coreSampleRate = c->audioSampleRate(c);
+			size_t samplesProduced;
+			if (coreSampleRate != targetSampleRate) {
+				/* Resample generated audio */
+				mAudioResamplerSetSource(&audioResampler, coreBuffer, coreSampleRate, true);
+				mAudioResamplerProcess(&audioResampler);
+				/* Output resampled audio */
+				size_t samplesAvail = mAudioBufferAvailable(&audioResampleBuffer);
+				samplesProduced = mAudioBufferRead(&audioResampleBuffer, audioSampleBuffer, samplesAvail);
+			} else {
+				samplesProduced = mAudioBufferRead(coreBuffer, audioSampleBuffer, coreSamplesAvail);
+			}
+
+			if (samplesProduced > 0) {
+				for (size_t s = 0; s < samplesProduced * 2; ++s) {
+					audioMixBuffer[s] += audioSampleBuffer[s];
 				}
-				if (samplesProduced > 0) {
-					if (audioLowPassEnabled) {
-						_audioLowPassFilter(audioSampleBuffer, samplesProduced);
-					}
-					audioCallback(audioSampleBuffer, samplesProduced);
-				}
+				if (samplesProduced > maxSamplesProduced) maxSamplesProduced = samplesProduced;
 			}
 		}
 	}
-#endif
+
+	if (maxSamplesProduced > 0) {
+		for (size_t s = 0; s < maxSamplesProduced * 2; ++s) {
+			int32_t val = audioMixBuffer[s];
+			if (val > 32767) val = 32767;
+			else if (val < -32768) val = -32768;
+			audioSampleBuffer[s] = (int16_t)val;
+		}
+		if (audioLowPassEnabled) {
+			_audioLowPassFilter(audioSampleBuffer, maxSamplesProduced);
+		}
+		audioCallback(audioSampleBuffer, maxSamplesProduced);
+	}
 }
 
 static void _setupMaps(struct mCore* core) {
@@ -1966,9 +1986,11 @@ static void _setupMaps(struct mCore* core) {
 }
 
 void retro_reset(void) {
-	core->reset(core);
+	for (int i = 0; i < numCores; ++i) {
+		controllers[i].core->reset(controllers[i].core);
+		_setupMaps(controllers[i].core);
+	}
 	mRumbleIntegratorReset(&rumble);
-	_setupMaps(core);
 }
 
 #ifdef GEKKO
@@ -2129,6 +2151,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 		 * > Multiply size by 2 (channels) */
 		audioSampleBufferSize = audioBufferSize * 2;
 		audioSampleBuffer = malloc(audioSampleBufferSize * sizeof(int16_t));
+		audioMixBuffer = malloc(audioSampleBufferSize * sizeof(int32_t));
 	} else
 #endif
 	{
@@ -2139,9 +2162,10 @@ bool retro_load_game(const struct retro_game_info* game) {
 		 * using the regular stream-set _postAudioBuffer()
 		 * callback with a fixed buffer size, which seems
 		 * (historically) to produce adequate results */
-		stream.postAudioBuffer = _postAudioBuffer;
+		stream.postAudioBuffer = NULL;
 		audioSampleBufferSize = GB_SAMPLES * 2;
 		audioSampleBuffer = malloc(audioSampleBufferSize * sizeof(int16_t));
+		audioMixBuffer = malloc(audioSampleBufferSize * sizeof(int32_t));
 		core->setAudioBufferSize(core, GB_SAMPLES);
 	}
 
@@ -2239,6 +2263,9 @@ void retro_unload_game(void) {
 		return;
 	}
 	for (int i = 0; i < numCores; ++i) {
+		if (numCores > 1) {
+			MultiplayerControllerDetachGame(&multiplayer, &controllers[i]);
+		}
 		if (controllers[i].hasStarted) {
 			CoreControllerStop(&controllers[i]);
 		}

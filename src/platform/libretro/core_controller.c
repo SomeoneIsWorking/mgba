@@ -39,7 +39,7 @@ void CoreControllerStop(struct CoreController* controller) {
     if (!controller->hasStarted) {
         return;
     }
-    mCoreThreadInterrupt(&controller->threadContext);
+    mCoreThreadEnd(&controller->threadContext);
     mCoreThreadJoin(&controller->threadContext);
     controller->hasStarted = false;
 }
