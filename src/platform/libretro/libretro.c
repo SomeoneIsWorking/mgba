@@ -2124,17 +2124,6 @@ bool retro_load_game(const struct retro_game_info* game) {
 		controllers[i].core->setPeripheral(controllers[i].core, mPERIPH_ROTATION, &rotation);
 	}
 
-	if (numCores > 1) {
-		for (int i = 0; i < numCores; ++i) {
-			CoreControllerStart(&controllers[i]);
-			mCoreThreadPause(&controllers[i].threadContext);
-			struct mCoreSync* sync = &controllers[i].threadContext.impl->sync;
-			MutexLock(&sync->videoFrameMutex);
-			sync->videoFrameWait = (i == 0);
-			MutexUnlock(&sync->videoFrameMutex);
-		}
-	}
-
 #ifdef M_CORE_GBA
 	/* GBA emulation produces a fairly regular number
 	 * of audio samples per frame that is consistent
@@ -2265,6 +2254,23 @@ bool retro_load_game(const struct retro_game_info* game) {
 		}
 	}
 #endif
+
+	if (numCores > 1) {
+		for (int i = 0; i < numCores; ++i) {
+			CoreControllerStart(&controllers[i]);
+			mCoreThreadPause(&controllers[i].threadContext);
+			struct mCoreSync* sync = &controllers[i].threadContext.impl->sync;
+			MutexLock(&sync->videoFrameMutex);
+			sync->videoFrameWait = false;
+			MutexUnlock(&sync->videoFrameMutex);
+
+			if (i > 0) {
+				MutexLock(&sync->audioBufferMutex);
+				sync->audioWait = false;
+				MutexUnlock(&sync->audioBufferMutex);
+			}
+		}
+	}
 
 	return true;
 }
