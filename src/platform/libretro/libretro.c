@@ -118,23 +118,6 @@ static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
 static struct mRotationSource rotation;
 
-static volatile int framesExecuted[MAX_PLAYERS] = {0, 0, 0, 0};
-static Mutex runMutex;
-static Condition runCond;
-
-static void _onFrameDone(struct mCoreThread* context) {
-	struct CoreController* cc = (struct CoreController*) context->userData;
-	for (int i = 0; i < numCores; ++i) {
-		if (&controllers[i] == cc) {
-			MutexLock(&runMutex);
-			framesExecuted[i]++;
-			ConditionWake(&runCond);
-			MutexUnlock(&runMutex);
-			break;
-		}
-	}
-}
-
 static void _updateMultiplayerLayout(void) {
 	if (!core) return;
 
@@ -1560,14 +1543,9 @@ void retro_init(void) {
 	retroAudioLatency       = 0;
 	updateAudioLatency      = false;
 	updateAudioRate         = false;
-
-	MutexInit(&runMutex);
-	ConditionInit(&runCond);
 }
 
 void retro_deinit(void) {
-	MutexDeinit(&runMutex);
-	ConditionDeinit(&runCond);
 	if (outputBuffer) {
 #ifdef _3DS
 		linearFree(outputBuffer);
@@ -1695,34 +1673,8 @@ void retro_run(void) {
 			controllers[p].core->setKeys(controllers[p].core, playerKeys);
 		}
 
-		int target[MAX_PLAYERS];
-		MutexLock(&runMutex);
-		for (int i = 0; i < numCores; ++i) {
-			target[i] = framesExecuted[i] + 1;
-		}
-		MutexUnlock(&runMutex);
-
-		for (int i = 0; i < numCores; ++i) {
-			mCoreThreadUnpause(&controllers[i].threadContext);
-		}
-
-		MutexLock(&runMutex);
-		while (true) {
-			bool allDone = true;
-			for (int i = 0; i < numCores; ++i) {
-				if (framesExecuted[i] < target[i]) {
-					allDone = false;
-					break;
-				}
-			}
-			if (allDone) break;
-			ConditionWait(&runCond, &runMutex);
-		}
-		MutexUnlock(&runMutex);
-
-		for (int i = 0; i < numCores; ++i) {
-			mCoreThreadPause(&controllers[i].threadContext);
-		}
+		MultiplayerControllerRunFrame(&multiplayer);
+		MultiplayerControllerWaitFrame(&multiplayer);
 	} else {
 		// Single player, keep original logic for performance
 		playerKeys = 0;
@@ -2174,9 +2126,12 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 	if (numCores > 1) {
 		for (int i = 0; i < numCores; ++i) {
-			controllers[i].threadContext.frameCallback = _onFrameDone;
 			CoreControllerStart(&controllers[i]);
 			mCoreThreadPause(&controllers[i].threadContext);
+			struct mCoreSync* sync = &controllers[i].threadContext.impl->sync;
+			MutexLock(&sync->videoFrameMutex);
+			sync->videoFrameWait = (i == 0);
+			MutexUnlock(&sync->videoFrameMutex);
 		}
 	}
 

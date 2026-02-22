@@ -16,10 +16,24 @@
 #include <mgba/internal/gb/sio/lockstep.h>
 #endif
 
+static void _lockstepLock(struct mLockstep* lockstep) {
+    MultiplayerController* controller = (MultiplayerController*) lockstep->context;
+    MutexLock(&controller->lockstepMutex);
+}
+
+static void _lockstepUnlock(struct mLockstep* lockstep) {
+    MultiplayerController* controller = (MultiplayerController*) lockstep->context;
+    MutexUnlock(&controller->lockstepMutex);
+}
+
 void MultiplayerControllerInit(MultiplayerController* controller) {
     memset(controller, 0, sizeof(*controller));
     mLockstepInit(&controller->lockstep);
+    controller->lockstep.context = controller;
+    controller->lockstep.lock = _lockstepLock;
+    controller->lockstep.unlock = _lockstepUnlock;
     controller->platform = mPLATFORM_NONE;
+    MutexInit(&controller->lockstepMutex);
 }
 
 void MultiplayerControllerDeinit(MultiplayerController* controller) {
@@ -29,12 +43,15 @@ void MultiplayerControllerDeinit(MultiplayerController* controller) {
         GBASIOLockstepCoordinatorDeinit(&controller->gbaCoordinator);
 #endif
     }
+    MutexDeinit(&controller->lockstepMutex);
 }
 
 bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct CoreController* game) {
     if (controller->attached >= MAX_PLAYERS) {
         return false;
     }
+
+    game->multiplayer = controller;
 
     if (controller->platform == mPLATFORM_NONE) {
         controller->platform = game->core->platform(game->core);
@@ -45,6 +62,9 @@ bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct C
         } else if (controller->platform == mPLATFORM_GB) {
 #ifdef M_CORE_GB
             GBSIOLockstepInit(&controller->gbLockstep);
+            controller->gbLockstep.d.lock = _lockstepLock;
+            controller->gbLockstep.d.unlock = _lockstepUnlock;
+            controller->gbLockstep.d.context = controller;
 #endif
         }
     } else if (controller->platform != game->core->platform(game->core)) {
@@ -94,6 +114,8 @@ void MultiplayerControllerDetachGame(MultiplayerController* controller, struct C
         return;
     }
 
+    game->multiplayer = NULL;
+
     if (controller->platform == mPLATFORM_GBA) {
 #ifdef M_CORE_GBA
         struct GBASIOLockstepDriver* driver = &controller->gbaDrivers[pid];
@@ -108,4 +130,41 @@ void MultiplayerControllerDetachGame(MultiplayerController* controller, struct C
 
     controller->players[pid] = NULL;
     // We don't shift players here because pid corresponds to indices in gbaDrivers/gbNodes.
+}
+
+void MultiplayerControllerRunFrame(MultiplayerController* controller) {
+    for (int i = 0; i < controller->attached; ++i) {
+        struct CoreController* cc = controller->players[i];
+        if (!cc) continue;
+        struct mCoreThread* thread = &cc->threadContext;
+        struct mCoreSync* sync = &thread->impl->sync;
+
+        if (mCoreThreadIsPaused(thread)) {
+            mCoreThreadUnpause(thread);
+        }
+
+        MutexLock(&sync->videoFrameMutex);
+        sync->videoFramePending = 0;
+        // Only the first core blocks at the end of its frame.
+        // This avoids deadlocks during hardware link handshakes at the end of frames.
+        sync->videoFrameWait = (i == 0);
+        ConditionWake(&sync->videoFrameRequiredCond);
+        MutexUnlock(&sync->videoFrameMutex);
+    }
+}
+
+void MultiplayerControllerWaitFrame(MultiplayerController* controller) {
+    if (controller->attached == 0 || !controller->players[0]) return;
+
+    // We only wait for the first player to finish its frame.
+    // Lockstep will naturally throttle the others to its speed.
+    struct CoreController* cc = controller->players[0];
+    struct mCoreThread* thread = &cc->threadContext;
+    struct mCoreSync* sync = &thread->impl->sync;
+
+    MutexLock(&sync->videoFrameMutex);
+    while (sync->videoFramePending == 0 && mCoreThreadIsActive(thread)) {
+        ConditionWait(&sync->videoFrameAvailableCond, &sync->videoFrameMutex);
+    }
+    MutexUnlock(&sync->videoFrameMutex);
 }

@@ -33,11 +33,15 @@ typedef struct MultiplayerController {
     int attached;
     enum mPlatform platform;
     int nextPid;
+    Mutex lockstepMutex;
 } MultiplayerController;
 
 void MultiplayerControllerInit(MultiplayerController* controller);
 void MultiplayerControllerDeinit(MultiplayerController* controller);
 bool MultiplayerControllerAttachGame(MultiplayerController* controller, struct CoreController* game);
 void MultiplayerControllerDetachGame(MultiplayerController* controller, struct CoreController* game);
+
+void MultiplayerControllerRunFrame(MultiplayerController* controller);
+void MultiplayerControllerWaitFrame(MultiplayerController* controller);
 
 #endif
