@@ -2258,17 +2258,6 @@ bool retro_load_game(const struct retro_game_info* game) {
 	if (numCores > 1) {
 		for (int i = 0; i < numCores; ++i) {
 			CoreControllerStart(&controllers[i]);
-			mCoreThreadPause(&controllers[i].threadContext);
-			struct mCoreSync* sync = &controllers[i].threadContext.impl->sync;
-			MutexLock(&sync->videoFrameMutex);
-			sync->videoFrameWait = false;
-			MutexUnlock(&sync->videoFrameMutex);
-
-			if (i > 0) {
-				MutexLock(&sync->audioBufferMutex);
-				sync->audioWait = false;
-				MutexUnlock(&sync->audioBufferMutex);
-			}
 		}
 	}
 
@@ -2283,11 +2272,12 @@ void retro_unload_game(void) {
 		if (numCores > 1) {
 			MultiplayerControllerDetachGame(&multiplayer, &controllers[i]);
 		}
-		if (controllers[i].hasStarted) {
+		if (CoreControllerHasStarted(&controllers[i])) {
 			CoreControllerStop(&controllers[i]);
 		}
 		mCoreConfigDeinit(&controllers[i].core->config);
 		controllers[i].core->deinit(controllers[i].core);
+		CoreControllerDeinit(&controllers[i]);
 	}
 	MultiplayerControllerDeinit(&multiplayer);
 	numCores = 1;

@@ -15,25 +15,36 @@
 
 #define MAX_PLAYERS 4
 
+typedef struct MultiplayerPlayer {
+    struct CoreController* controller;
+    int preferredId;
+    bool attached;
+    int awake;
+    unsigned waitMask;
+    int32_t cyclesPosted;
+#ifdef M_CORE_GBA
+    struct mLockstepThreadUser gbaUser;
+    struct GBASIOLockstepDriver gbaDriver;
+#endif
+#ifdef M_CORE_GB
+    struct GBSIOLockstepNode gbNode;
+#endif
+} MultiplayerPlayer;
+
 typedef struct MultiplayerController {
     struct mLockstep lockstep;
+    Mutex lock;
 #ifdef M_CORE_GB
     struct GBSIOLockstep gbLockstep;
-    struct GBSIOLockstepNode gbNodes[MAX_PLAYERS];
 #endif
 #ifdef M_CORE_GBA
     struct GBASIOLockstepCoordinator gbaCoordinator;
-    struct GBASIOLockstepDriver gbaDrivers[MAX_PLAYERS];
-#ifndef DISABLE_THREADING
-    struct mLockstepThreadUser gbaUsers[MAX_PLAYERS];
-#endif
 #endif
 
-    struct CoreController* players[MAX_PLAYERS];
-    int attached;
+    MultiplayerPlayer players[MAX_PLAYERS];
+    int nPlayers;
     enum mPlatform platform;
-    int nextPid;
-    Mutex lockstepMutex;
+    uint32_t claimedIds;
 } MultiplayerController;
 
 void MultiplayerControllerInit(MultiplayerController* controller);
