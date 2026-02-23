@@ -10,9 +10,7 @@ struct CoreController {
     struct mCore* core;
     char path[256];
     char savePath[256];
-    bool isPaused;
     bool hasStarted;
-    void* userData;
     struct MultiplayerController* multiplayer;
 };
 
@@ -21,5 +19,9 @@ void CoreControllerDeinit(struct CoreController* controller);
 void CoreControllerSetPath(struct CoreController* controller, const char* path);
 void CoreControllerStart(struct CoreController* controller);
 void CoreControllerStop(struct CoreController* controller);
+bool CoreControllerIsPaused(const struct CoreController* controller);
+bool CoreControllerHasStarted(const struct CoreController* controller);
+void CoreControllerSetMultiplayer(struct CoreController* controller, struct MultiplayerController* multiplayer);
+void CoreControllerClearMultiplayer(struct CoreController* controller);
 
 #endif

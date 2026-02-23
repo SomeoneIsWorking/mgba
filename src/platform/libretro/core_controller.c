@@ -9,26 +9,30 @@ void CoreControllerInit(struct CoreController* controller, struct mCore* core) {
     controller->core = core;
     controller->threadContext.core = core;
     controller->threadContext.userData = controller;
-    
-    // Minimal version from Qt:
-    controller->isPaused = false;
     controller->hasStarted = false;
-    
-    // Qt version adds a lot of logging, etc. but we'll use libretro callbacks directly later.
+    controller->multiplayer = NULL;
 }
 
 void CoreControllerDeinit(struct CoreController* controller) {
-    if (controller->core) {
-        controller->core->deinit(controller->core);
+    if (!controller) {
+        return;
     }
+    controller->hasStarted = false;
+    controller->multiplayer = NULL;
+    controller->core = NULL;
 }
 
 void CoreControllerSetPath(struct CoreController* controller, const char* path) {
+    if (!path) {
+        controller->path[0] = '\0';
+        return;
+    }
     strncpy(controller->path, path, sizeof(controller->path) - 1);
+    controller->path[sizeof(controller->path) - 1] = '\0';
 }
 
 void CoreControllerStart(struct CoreController* controller) {
-    if (controller->hasStarted) {
+    if (!controller || !controller->core || controller->hasStarted) {
         return;
     }
     mCoreThreadStart(&controller->threadContext);
@@ -36,10 +40,35 @@ void CoreControllerStart(struct CoreController* controller) {
 }
 
 void CoreControllerStop(struct CoreController* controller) {
-    if (!controller->hasStarted) {
+    if (!controller || !controller->hasStarted) {
         return;
     }
     mCoreThreadEnd(&controller->threadContext);
     mCoreThreadJoin(&controller->threadContext);
     controller->hasStarted = false;
+}
+
+bool CoreControllerIsPaused(const struct CoreController* controller) {
+    if (!controller || !controller->hasStarted) {
+        return false;
+    }
+    return mCoreThreadIsPaused((struct mCoreThread*) &controller->threadContext);
+}
+
+bool CoreControllerHasStarted(const struct CoreController* controller) {
+    return controller && controller->hasStarted;
+}
+
+void CoreControllerSetMultiplayer(struct CoreController* controller, struct MultiplayerController* multiplayer) {
+    if (!controller) {
+        return;
+    }
+    controller->multiplayer = multiplayer;
+}
+
+void CoreControllerClearMultiplayer(struct CoreController* controller) {
+    if (!controller) {
+        return;
+    }
+    controller->multiplayer = NULL;
 }
