@@ -20,6 +20,7 @@ set(SOURCE_FILES
 	io.c
 	memory.c
 	overrides.c
+	transient-log.c
 	renderers/cache-set.c
 	renderers/common.c
 	renderers/gl.c
