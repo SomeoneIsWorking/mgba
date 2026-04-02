@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <mgba/internal/gba/transient-log.h>
 
+#include <mgba/internal/arm/arm.h>
+
 #include <stdlib.h>
 
 struct GBATransientLogState {
@@ -53,7 +55,14 @@ static bool _reserve(size_t needed) {
 	return true;
 }
 
-static void _record(uint32_t addr, uint32_t oldValue, uint32_t newValue, uint8_t width) {
+static uint32_t _callerPc(struct ARMCore* cpu) {
+	if (!cpu) {
+		return 0;
+	}
+	return cpu->gprs[ARM_PC] - (cpu->cpsr.t == MODE_ARM ? WORD_SIZE_ARM : WORD_SIZE_THUMB) * 2;
+}
+
+static void _record(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue, uint8_t width) {
 	if (!sTransientLog.enabled || !_trackAddress(addr) || oldValue == newValue) {
 		return;
 	}
@@ -66,6 +75,8 @@ static void _record(uint32_t addr, uint32_t oldValue, uint32_t newValue, uint8_t
 	event->addr = addr;
 	event->oldValue = oldValue;
 	event->newValue = newValue;
+	event->pc = _callerPc(cpu);
+	event->lr = cpu ? (uint32_t) cpu->gprs[ARM_LR] : 0;
 	event->width = width;
 }
 
@@ -81,16 +92,16 @@ void GBATransientLogReset(void) {
 	sTransientLog.count = 0;
 }
 
-void GBATransientLogRecord8(uint32_t addr, uint32_t oldValue, uint32_t newValue) {
-	_record(addr, oldValue & 0xFF, newValue & 0xFF, 1);
+void GBATransientLogRecord8(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue) {
+	_record(cpu, addr, oldValue & 0xFF, newValue & 0xFF, 1);
 }
 
-void GBATransientLogRecord16(uint32_t addr, uint32_t oldValue, uint32_t newValue) {
-	_record(addr, oldValue & 0xFFFF, newValue & 0xFFFF, 2);
+void GBATransientLogRecord16(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue) {
+	_record(cpu, addr, oldValue & 0xFFFF, newValue & 0xFFFF, 2);
 }
 
-void GBATransientLogRecord32(uint32_t addr, uint32_t oldValue, uint32_t newValue) {
-	_record(addr, oldValue, newValue, 4);
+void GBATransientLogRecord32(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue) {
+	_record(cpu, addr, oldValue, newValue, 4);
 }
 
 size_t GBATransientLogCount(void) {
