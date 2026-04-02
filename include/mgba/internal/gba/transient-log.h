@@ -10,19 +10,23 @@
 
 CXX_GUARD_START
 
+struct ARMCore;
+
 struct GBATransientWriteEvent {
 	uint32_t addr;
 	uint32_t oldValue;
 	uint32_t newValue;
+	uint32_t pc;
+	uint32_t lr;
 	uint8_t width;
 };
 
 void GBATransientLogEnable(bool enabled);
 bool GBATransientLogIsEnabled(void);
 void GBATransientLogReset(void);
-void GBATransientLogRecord8(uint32_t addr, uint32_t oldValue, uint32_t newValue);
-void GBATransientLogRecord16(uint32_t addr, uint32_t oldValue, uint32_t newValue);
-void GBATransientLogRecord32(uint32_t addr, uint32_t oldValue, uint32_t newValue);
+void GBATransientLogRecord8(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue);
+void GBATransientLogRecord16(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue);
+void GBATransientLogRecord32(struct ARMCore* cpu, uint32_t addr, uint32_t oldValue, uint32_t newValue);
 size_t GBATransientLogCount(void);
 const struct GBATransientWriteEvent* GBATransientLogEvents(void);
 
