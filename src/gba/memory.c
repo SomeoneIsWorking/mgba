@@ -12,6 +12,7 @@
 #include <mgba/internal/gba/dma.h>
 #include <mgba/internal/gba/io.h>
 #include <mgba/internal/gba/serialize.h>
+#include <mgba/internal/gba/transient-log.h>
 #include "gba/hle-bios.h"
 
 #include <mgba-util/math.h>
@@ -757,11 +758,15 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 }
 
 #define STORE_EWRAM \
+	LOAD_32(oldValue, address & (GBA_SIZE_EWRAM - 4), memory->wram); \
 	STORE_32(value, address & (GBA_SIZE_EWRAM - 4), memory->wram); \
+	GBATransientLogRecord32(GBA_BASE_EWRAM | (address & (GBA_SIZE_EWRAM - 4)), oldValue, value); \
 	wait += waitstatesRegion[GBA_REGION_EWRAM];
 
 #define STORE_IWRAM \
-	STORE_32(value, address & (GBA_SIZE_IWRAM - 4), memory->iwram);
+	LOAD_32(oldValue, address & (GBA_SIZE_IWRAM - 4), memory->iwram); \
+	STORE_32(value, address & (GBA_SIZE_IWRAM - 4), memory->iwram); \
+	GBATransientLogRecord32(GBA_BASE_IWRAM | (address & (GBA_SIZE_IWRAM - 4)), oldValue, value);
 
 #define STORE_IO \
 	GBAIOWrite32(gba, address & (OFFSET_MASK - 3), value);
@@ -770,6 +775,7 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 	LOAD_32(oldValue, address & (GBA_SIZE_PALETTE_RAM - 4), gba->video.palette); \
 	if (oldValue != value) { \
 		STORE_32(value, address & (GBA_SIZE_PALETTE_RAM - 4), gba->video.palette); \
+		GBATransientLogRecord32(GBA_BASE_PALETTE_RAM | (address & (GBA_SIZE_PALETTE_RAM - 4)), oldValue, value); \
 		gba->video.renderer->writePalette(gba->video.renderer, (address & (GBA_SIZE_PALETTE_RAM - 4)) + 2, value >> 16); \
 		gba->video.renderer->writePalette(gba->video.renderer, address & (GBA_SIZE_PALETTE_RAM - 4), value); \
 	} \
@@ -783,6 +789,7 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 			LOAD_32(oldValue, address & 0x00017FFC, gba->video.vram); \
 			if (oldValue != value) { \
 				STORE_32(value, address & 0x00017FFC, gba->video.vram); \
+				GBATransientLogRecord32(GBA_BASE_VRAM | (address & 0x00017FFC), oldValue, value); \
 				gba->video.renderer->writeVRAM(gba->video.renderer, (address & 0x00017FFC) + 2); \
 				gba->video.renderer->writeVRAM(gba->video.renderer, (address & 0x00017FFC)); \
 			} \
@@ -791,6 +798,7 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 		LOAD_32(oldValue, address & 0x0001FFFC, gba->video.vram); \
 		if (oldValue != value) { \
 			STORE_32(value, address & 0x0001FFFC, gba->video.vram); \
+			GBATransientLogRecord32(GBA_BASE_VRAM | (address & 0x0001FFFC), oldValue, value); \
 			gba->video.renderer->writeVRAM(gba->video.renderer, (address & 0x0001FFFC) + 2); \
 			gba->video.renderer->writeVRAM(gba->video.renderer, (address & 0x0001FFFC)); \
 		} \
@@ -804,6 +812,7 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 	LOAD_32(oldValue, address & (GBA_SIZE_OAM - 4), gba->video.oam.raw); \
 	if (oldValue != value) { \
 		STORE_32(value, address & (GBA_SIZE_OAM - 4), gba->video.oam.raw); \
+		GBATransientLogRecord32(GBA_BASE_OAM | (address & (GBA_SIZE_OAM - 4)), oldValue, value); \
 		gba->video.renderer->writeOAM(gba->video.renderer, (address & (GBA_SIZE_OAM - 4)) >> 1); \
 		gba->video.renderer->writeOAM(gba->video.renderer, ((address & (GBA_SIZE_OAM - 4)) >> 1) + 1); \
 	}
@@ -882,11 +891,15 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
 
 	switch (address >> BASE_OFFSET) {
 	case GBA_REGION_EWRAM:
+		LOAD_16(oldValue, address & (GBA_SIZE_EWRAM - 2), memory->wram);
 		STORE_16(value, address & (GBA_SIZE_EWRAM - 2), memory->wram);
+		GBATransientLogRecord16(GBA_BASE_EWRAM | (address & (GBA_SIZE_EWRAM - 2)), oldValue, value);
 		wait = memory->waitstatesNonseq16[GBA_REGION_EWRAM];
 		break;
 	case GBA_REGION_IWRAM:
+		LOAD_16(oldValue, address & (GBA_SIZE_IWRAM - 2), memory->iwram);
 		STORE_16(value, address & (GBA_SIZE_IWRAM - 2), memory->iwram);
+		GBATransientLogRecord16(GBA_BASE_IWRAM | (address & (GBA_SIZE_IWRAM - 2)), oldValue, value);
 		break;
 	case GBA_REGION_IO:
 		GBAIOWrite(gba, address & (OFFSET_MASK - 1), value);
@@ -895,6 +908,7 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
 		LOAD_16(oldValue, address & (GBA_SIZE_PALETTE_RAM - 2), gba->video.palette);
 		if (oldValue != value) {
 			STORE_16(value, address & (GBA_SIZE_PALETTE_RAM - 2), gba->video.palette);
+			GBATransientLogRecord16(GBA_BASE_PALETTE_RAM | (address & (GBA_SIZE_PALETTE_RAM - 2)), oldValue, value);
 			gba->video.renderer->writePalette(gba->video.renderer, address & (GBA_SIZE_PALETTE_RAM - 2), value);
 		}
 		break;
@@ -907,12 +921,14 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
 			LOAD_16(oldValue, address & 0x00017FFE, gba->video.vram);
 			if (value != oldValue) {
 				STORE_16(value, address & 0x00017FFE, gba->video.vram);
+				GBATransientLogRecord16(GBA_BASE_VRAM | (address & 0x00017FFE), oldValue, value);
 				gba->video.renderer->writeVRAM(gba->video.renderer, address & 0x00017FFE);
 			}
 		} else {
 			LOAD_16(oldValue, address & 0x0001FFFE, gba->video.vram);
 			if (value != oldValue) {
 				STORE_16(value, address & 0x0001FFFE, gba->video.vram);
+				GBATransientLogRecord16(GBA_BASE_VRAM | (address & 0x0001FFFE), oldValue, value);
 				gba->video.renderer->writeVRAM(gba->video.renderer, address & 0x0001FFFE);
 			}
 		}
@@ -924,6 +940,7 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
 		LOAD_16(oldValue, address & (GBA_SIZE_OAM - 2), gba->video.oam.raw);
 		if (value != oldValue) {
 			STORE_16(value, address & (GBA_SIZE_OAM - 2), gba->video.oam.raw);
+			GBATransientLogRecord16(GBA_BASE_OAM | (address & (GBA_SIZE_OAM - 2)), oldValue, value);
 			gba->video.renderer->writeOAM(gba->video.renderer, (address & (GBA_SIZE_OAM - 2)) >> 1);
 		}
 		break;
@@ -1027,11 +1044,15 @@ void GBAStore8(struct ARMCore* cpu, uint32_t address, int8_t value, int* cycleCo
 
 	switch (address >> BASE_OFFSET) {
 	case GBA_REGION_EWRAM:
+		oldValue = ((int8_t*) memory->wram)[address & (GBA_SIZE_EWRAM - 1)];
 		((int8_t*) memory->wram)[address & (GBA_SIZE_EWRAM - 1)] = value;
+		GBATransientLogRecord8(address, (uint8_t) oldValue, (uint8_t) value);
 		wait = memory->waitstatesNonseq16[GBA_REGION_EWRAM];
 		break;
 	case GBA_REGION_IWRAM:
+		oldValue = ((int8_t*) memory->iwram)[address & (GBA_SIZE_IWRAM - 1)];
 		((int8_t*) memory->iwram)[address & (GBA_SIZE_IWRAM - 1)] = value;
+		GBATransientLogRecord8(address, (uint8_t) oldValue, (uint8_t) value);
 		break;
 	case GBA_REGION_IO:
 		GBAIOWrite8(gba, address & OFFSET_MASK, value);
@@ -1047,6 +1068,8 @@ void GBAStore8(struct ARMCore* cpu, uint32_t address, int8_t value, int* cycleCo
 		oldValue = gba->video.renderer->vram[(address & 0x1FFFE) >> 1];
 		if (oldValue != (((uint8_t) value) | (value << 8))) {
 			gba->video.renderer->vram[(address & 0x1FFFE) >> 1] = ((uint8_t) value) | (value << 8);
+			GBATransientLogRecord16(GBA_BASE_VRAM | (address & 0x0001FFFE), oldValue,
+					((uint8_t) value) | ((uint8_t) value << 8));
 			gba->video.renderer->writeVRAM(gba->video.renderer, address & 0x0001FFFE);
 		}
 		if (gba->video.stallMask) {
