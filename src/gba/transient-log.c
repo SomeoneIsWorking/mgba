@@ -19,6 +19,9 @@ struct GBATransientLogState {
 static struct GBATransientLogState sTransientLog;
 
 static bool _trackAddress(uint32_t addr) {
+	if (addr >= 0x02000000 && addr < 0x02040000) {
+		return true;
+	}
 	if (addr >= 0x03000000 && addr < 0x03008000) {
 		return true;
 	}
