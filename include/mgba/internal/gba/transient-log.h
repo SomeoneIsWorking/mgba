@@ -18,7 +18,11 @@ struct GBATransientWriteEvent {
 	uint32_t newValue;
 	uint32_t pc;
 	uint32_t lr;
+	uint32_t opcode;
 	uint8_t width;
+	uint8_t execMode;
+	bool hasOperation;
+	char opText[96];
 };
 
 void GBATransientLogEnable(bool enabled);
