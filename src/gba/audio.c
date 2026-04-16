@@ -13,6 +13,10 @@
 #include <mgba/internal/gba/serialize.h>
 #include <mgba/internal/gba/video.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define MP2K_LOCK_MAX 8
 
 mLOG_DEFINE_CATEGORY(GBA_AUDIO, "GBA Audio", "gba.audio");
@@ -24,6 +28,15 @@ static const int SAMPLE_INTERVAL = GBA_ARM7TDMI_FREQUENCY / 0x4000;
 
 static int _applyBias(struct GBAAudio* audio, int sample);
 static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
+
+static bool _kirbyTraceMgbaAudio(const struct GBAAudio* audio) {
+	static int cached = -1;
+	if (cached < 0) {
+		const char* env = getenv("KIRBY_TRACE_MGBA_AUDIO");
+		cached = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached > 0 && audio && audio->p && audio->p->cpu;
+}
 
 void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
 	audio->sampleEvent.context = audio;
@@ -203,6 +216,26 @@ void GBAAudioWriteSOUNDCNT_HI(struct GBAAudio* audio, uint16_t value) {
 		audio->chB.fifoWrite = 0;
 		audio->chB.fifoRead = 0;
 	}
+	if (_kirbyTraceMgbaAudio(audio)) {
+		fprintf(stderr,
+		        "[MGBA_AUDIO_CNT_HI] time=%d value=%04X vol=%u volA=%u volB=%u chA(L=%u R=%u T=%u) chB(L=%u R=%u T=%u) fifoA=%d/%d fifoB=%d/%d next_sample=%d\n",
+		        mTimingCurrentTime(&audio->p->timing),
+		        value,
+		        audio->volume,
+		        audio->volumeChA ? 1 : 0,
+		        audio->volumeChB ? 1 : 0,
+		        audio->chALeft ? 1 : 0,
+		        audio->chARight ? 1 : 0,
+		        audio->chATimer ? 1 : 0,
+		        audio->chBLeft ? 1 : 0,
+		        audio->chBRight ? 1 : 0,
+		        audio->chBTimer ? 1 : 0,
+		        audio->chA.fifoRead,
+		        audio->chA.fifoWrite,
+		        audio->chB.fifoRead,
+		        audio->chB.fifoWrite,
+		        mTimingUntil(&audio->p->timing, &audio->sampleEvent));
+	}
 }
 
 void GBAAudioWriteSOUNDCNT_X(struct GBAAudio* audio, uint16_t value) {
@@ -226,10 +259,21 @@ void GBAAudioWriteSOUNDCNT_X(struct GBAAudio* audio, uint16_t value) {
 
 void GBAAudioWriteSOUNDBIAS(struct GBAAudio* audio, uint16_t value) {
 	int32_t timestamp = mTimingCurrentTime(&audio->p->timing);
-	GBAAudioSample(audio, timestamp);
-	audio->soundbias = value;
 	int32_t oldSampleInterval = audio->sampleInterval;
+	GBAudioSample(audio, timestamp);
+	audio->soundbias = value;
 	audio->sampleInterval = 0x200 >> GBARegisterSOUNDBIASGetResolution(value);
+	if (_kirbyTraceMgbaAudio(audio)) {
+		fprintf(stderr,
+		        "[MGBA_AUDIO_BIAS] time=%d value=%04X resolution=%u old_interval=%d new_interval=%d sample_index=%u last_sample=%d\n",
+		        timestamp,
+		        value,
+		        GBARegisterSOUNDBIASGetResolution(value),
+		        oldSampleInterval,
+		        audio->sampleInterval,
+		        audio->sampleIndex,
+		        audio->lastSample);
+	}
 	if (oldSampleInterval != audio->sampleInterval) {
 		timestamp -= audio->lastSample;
 		audio->sampleIndex = timestamp >> (9 - GBARegisterSOUNDBIASGetResolution(value));
@@ -399,7 +443,12 @@ void GBAAudioSample(struct GBAAudio* audio, int32_t timestamp) {
 
 static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	struct GBAAudio* audio = user;
-	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing) - cyclesLate);
+	size_t bufferedBefore = 0;
+	int32_t timestamp = mTimingCurrentTime(&audio->p->timing) - cyclesLate;
+	if (_kirbyTraceMgbaAudio(audio)) {
+		bufferedBefore = mAudioBufferAvailable(&audio->psg.buffer);
+	}
+	GBAAudioSample(audio, timestamp);
 
 	int samples = 2 << GBARegisterSOUNDBIASGetResolution(audio->soundbias);
 	memset(audio->chA.samples, audio->chA.samples[samples - 1], sizeof(audio->chA.samples));
@@ -425,6 +474,26 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	if (!mCoreSyncProduceAudio(audio->p->sync, &audio->psg.buffer)) {
 		// Interrupted
 		GBAInterrupt(audio->p);
+	}
+	if (_kirbyTraceMgbaAudio(audio)) {
+		fprintf(stderr,
+		        "[MGBA_AUDIO_SAMPLE] time=%d late=%u resolution=%u interval=%d produced=%d buffered_before=%zu buffered_after=%zu sample_index=%u last_sample=%d next_sample=%d fifoA(rem=%d read=%d write=%d) fifoB(rem=%d read=%d write=%d)\n",
+		        timestamp,
+		        cyclesLate,
+		        GBARegisterSOUNDBIASGetResolution(audio->soundbias),
+		        audio->sampleInterval,
+		        samples,
+		        bufferedBefore,
+		        mAudioBufferAvailable(&audio->psg.buffer),
+		        audio->sampleIndex,
+		        audio->lastSample,
+		        SAMPLE_INTERVAL - (int)cyclesLate,
+		        audio->chA.internalRemaining,
+		        audio->chA.fifoRead,
+		        audio->chA.fifoWrite,
+		        audio->chB.internalRemaining,
+		        audio->chB.fifoRead,
+		        audio->chB.fifoWrite);
 	}
 	mTimingSchedule(timing, &audio->sampleEvent, SAMPLE_INTERVAL - cyclesLate);
 }
