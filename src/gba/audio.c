@@ -55,6 +55,18 @@ static int _kirbyAudioPeakAbs(const struct mStereoSample* samples, int count) {
 	return peak;
 }
 
+static void _kirbyTraceMgbaSoundWrite(struct GBAAudio* audio, const char* reg, uint16_t value) {
+	if (!_kirbyTraceMgbaAudio(audio)) {
+		return;
+	}
+
+	fprintf(stderr,
+	        "[MGBA_AUDIO_SOUND] time=%d reg=%s value=%04X\n",
+	        mTimingCurrentTime(&audio->p->timing),
+	        reg,
+	        value);
+}
+
 void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
 	audio->sampleEvent.context = audio;
 	audio->sampleEvent.name = "GBA Audio Sample";
@@ -150,35 +162,41 @@ void GBAAudioScheduleFifoDma(struct GBAAudio* audio, int number, struct GBADMA* 
 }
 
 void GBAAudioWriteSOUND1CNT_LO(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND1CNT_LO", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR10(&audio->psg, value);
 }
 
 void GBAAudioWriteSOUND1CNT_HI(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND1CNT_HI", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR11(&audio->psg, value);
 	GBAudioWriteNR12(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND1CNT_X(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND1CNT_X", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR13(&audio->psg, value);
 	GBAudioWriteNR14(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND2CNT_LO(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND2CNT_LO", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR21(&audio->psg, value);
 	GBAudioWriteNR22(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND2CNT_HI(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND2CNT_HI", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR23(&audio->psg, value);
 	GBAudioWriteNR24(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND3CNT_LO(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND3CNT_LO", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	audio->psg.ch3.size = GBAudioRegisterBankGetSize(value);
 	audio->psg.ch3.bank = GBAudioRegisterBankGetBank(value);
@@ -186,30 +204,35 @@ void GBAAudioWriteSOUND3CNT_LO(struct GBAAudio* audio, uint16_t value) {
 }
 
 void GBAAudioWriteSOUND3CNT_HI(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND3CNT_HI", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR31(&audio->psg, value);
 	audio->psg.ch3.volume = GBAudioRegisterBankVolumeGetVolumeGBA(value >> 8);
 }
 
 void GBAAudioWriteSOUND3CNT_X(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND3CNT_X", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR33(&audio->psg, value);
 	GBAudioWriteNR34(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND4CNT_LO(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND4CNT_LO", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR41(&audio->psg, value);
 	GBAudioWriteNR42(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUND4CNT_HI(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUND4CNT_HI", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR43(&audio->psg, value);
 	GBAudioWriteNR44(&audio->psg, value >> 8);
 }
 
 void GBAAudioWriteSOUNDCNT_LO(struct GBAAudio* audio, uint16_t value) {
+	_kirbyTraceMgbaSoundWrite(audio, "SOUNDCNT_LO", value);
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	GBAudioWriteNR50(&audio->psg, value);
 	GBAudioWriteNR51(&audio->psg, value >> 8);
