@@ -27,6 +27,7 @@ const int GBA_AUDIO_VOLUME_MAX = 0x100;
 static const int SAMPLE_INTERVAL = GBA_ARM7TDMI_FREQUENCY / 0x4000;
 
 static int _applyBias(struct GBAAudio* audio, int sample);
+void GBAAudioSample(struct GBAAudio* audio, int32_t timestamp);
 static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
 
 static bool _kirbyTraceMgbaAudio(const struct GBAAudio* audio) {
@@ -36,6 +37,22 @@ static bool _kirbyTraceMgbaAudio(const struct GBAAudio* audio) {
 		cached = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
 	}
 	return cached > 0 && audio && audio->p && audio->p->cpu;
+}
+
+static int _kirbyAudioPeakAbs(const struct mStereoSample* samples, int count) {
+	int peak = 0;
+	int i;
+	for (i = 0; i < count; ++i) {
+		int left = samples[i].left < 0 ? -samples[i].left : samples[i].left;
+		int right = samples[i].right < 0 ? -samples[i].right : samples[i].right;
+		if (left > peak) {
+			peak = left;
+		}
+		if (right > peak) {
+			peak = right;
+		}
+	}
+	return peak;
 }
 
 void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
@@ -260,7 +277,7 @@ void GBAAudioWriteSOUNDCNT_X(struct GBAAudio* audio, uint16_t value) {
 void GBAAudioWriteSOUNDBIAS(struct GBAAudio* audio, uint16_t value) {
 	int32_t timestamp = mTimingCurrentTime(&audio->p->timing);
 	int32_t oldSampleInterval = audio->sampleInterval;
-	GBAudioSample(audio, timestamp);
+	GBAAudioSample(audio, timestamp);
 	audio->soundbias = value;
 	audio->sampleInterval = 0x200 >> GBARegisterSOUNDBIASGetResolution(value);
 	if (_kirbyTraceMgbaAudio(audio)) {
@@ -324,6 +341,15 @@ uint32_t GBAAudioWriteFIFO(struct GBAAudio* audio, int address, uint32_t value) 
 	default:
 		mLOG(GBA_AUDIO, ERROR, "Bad FIFO write to address 0x%03x", address);
 		return value;
+	}
+	if (_kirbyTraceMgbaAudio(audio)) {
+		fprintf(stderr,
+		        "[MGBA_AUDIO_FIFO] time=%d addr=%03X value=%08X write=%d read=%d\n",
+		        mTimingCurrentTime(&audio->p->timing),
+		        address,
+		        value,
+		        channel->fifoWrite,
+		        channel->fifoRead);
 	}
 	channel->fifo[channel->fifoWrite] = value;
 	++channel->fifoWrite;
@@ -477,12 +503,13 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	}
 	if (_kirbyTraceMgbaAudio(audio)) {
 		fprintf(stderr,
-		        "[MGBA_AUDIO_SAMPLE] time=%d late=%u resolution=%u interval=%d produced=%d buffered_before=%zu buffered_after=%zu sample_index=%u last_sample=%d next_sample=%d fifoA(rem=%d read=%d write=%d) fifoB(rem=%d read=%d write=%d)\n",
+		        "[MGBA_AUDIO_SAMPLE] time=%d late=%u resolution=%u interval=%d produced=%d peak=%d buffered_before=%zu buffered_after=%zu sample_index=%u last_sample=%d next_sample=%d fifoA(rem=%d read=%d write=%d) fifoB(rem=%d read=%d write=%d)\n",
 		        timestamp,
 		        cyclesLate,
 		        GBARegisterSOUNDBIASGetResolution(audio->soundbias),
 		        audio->sampleInterval,
 		        samples,
+		        _kirbyAudioPeakAbs(audio->currentSamples, samples),
 		        bufferedBefore,
 		        mAudioBufferAvailable(&audio->psg.buffer),
 		        audio->sampleIndex,
