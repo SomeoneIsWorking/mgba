@@ -39,6 +39,15 @@ static bool _kirbyTraceMgbaAudio(const struct GBAAudio* audio) {
 	return cached > 0 && audio && audio->p && audio->p->cpu;
 }
 
+static bool _kirbyTraceBackendAudioSample(const struct GBAAudio* audio) {
+	static int cached = -1;
+	if (cached < 0) {
+		const char* env = getenv("KIRBY_TRACE_BACKEND_AUDIO_SAMPLE");
+		cached = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached > 0 && audio && audio->p && !audio->p->cpu;
+}
+
 static int _kirbyAudioPeakAbs(const struct mStereoSample* samples, int count) {
 	int peak = 0;
 	int i;
@@ -53,6 +62,28 @@ static int _kirbyAudioPeakAbs(const struct mStereoSample* samples, int count) {
 		}
 	}
 	return peak;
+}
+
+static void _kirbyFormatSampleQuad(const struct mStereoSample* samples, int count, char* out, size_t outSize) {
+	int written = 0;
+	int limit = count < 4 ? count : 4;
+	int i;
+	if (!outSize) {
+		return;
+	}
+	out[0] = '\0';
+	for (i = 0; i < limit; ++i) {
+		int n = snprintf(out + written,
+		                 outSize - (size_t) written,
+		                 "%s%d/%d",
+		                 i ? "," : "",
+		                 samples[i].left,
+		                 samples[i].right);
+		if (n < 0 || (size_t) n >= outSize - (size_t) written) {
+			break;
+		}
+		written += n;
+	}
 }
 
 static void _kirbyTraceMgbaSoundWrite(struct GBAAudio* audio, const char* reg, uint16_t value) {
@@ -279,6 +310,14 @@ void GBAAudioWriteSOUNDCNT_HI(struct GBAAudio* audio, uint16_t value) {
 }
 
 void GBAAudioWriteSOUNDCNT_X(struct GBAAudio* audio, uint16_t value) {
+	if (_kirbyTraceMgbaAudio(audio)) {
+		fprintf(stderr,
+		        "[MGBA_AUDIO_CNT_X] time=%d value=%04X enable_before=%d psg_frame=%d\n",
+		        mTimingCurrentTime(&audio->p->timing),
+		        value,
+		        audio->enable ? 1 : 0,
+		        audio->psg.frame);
+	}
 	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing));
 	audio->enable = GBAudioEnableGetEnable(value);
 	GBAudioWriteNR52(&audio->psg, value);
@@ -494,6 +533,7 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	struct GBAAudio* audio = user;
 	size_t bufferedBefore = 0;
 	int32_t timestamp = mTimingCurrentTime(&audio->p->timing) - cyclesLate;
+	bool traceBackendSample = _kirbyTraceBackendAudioSample(audio);
 	if (_kirbyTraceMgbaAudio(audio)) {
 		bufferedBefore = mAudioBufferAvailable(&audio->psg.buffer);
 	}
@@ -525,9 +565,13 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 		GBAInterrupt(audio->p);
 	}
 	if (_kirbyTraceMgbaAudio(audio)) {
+		char sampleQuad[80];
+		_kirbyFormatSampleQuad(audio->currentSamples, samples, sampleQuad, sizeof(sampleQuad));
 		fprintf(stderr,
 		        "[MGBA_AUDIO_SAMPLE] time=%d late=%u resolution=%u interval=%d produced=%d peak=%d buffered_before=%zu buffered_after=%zu sample_index=%u last_sample=%d next_sample=%d "
-		        "psg(volL=%u volR=%u route=%d%d%d%d/%d%d%d%d play=%d%d%d%d sample=%d,%d,%d,%d) "
+		        "psg(frame=%d volL=%u volR=%u route=%d%d%d%d/%d%d%d%d play=%d%d%d%d sample=%d,%d,%d,%d "
+		        "ch4(env=%d dead=%d next=%d len=%d stop=%d ratio=%d freq=%d power=%d last=%u lfsr=%04X)) "
+		        "ds(vol=%u A=%d%d%d/%d B=%d%d%d/%d) out=%s "
 		        "fifoA(rem=%d read=%d write=%d) fifoB(rem=%d read=%d write=%d)\n",
 		        timestamp,
 		        cyclesLate,
@@ -540,6 +584,7 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 		        audio->sampleIndex,
 		        audio->lastSample,
 		        SAMPLE_INTERVAL - (int)cyclesLate,
+		        audio->psg.frame,
 		        (unsigned)audio->psg.volumeLeft,
 		        (unsigned)audio->psg.volumeRight,
 		        audio->psg.ch1Left ? 1 : 0,
@@ -558,12 +603,61 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 		        audio->psg.ch2.sample,
 		        audio->psg.ch3.sample,
 		        audio->psg.ch4.sample,
+		        audio->psg.ch4.envelope.currentVolume,
+		        audio->psg.ch4.envelope.dead,
+		        audio->psg.ch4.envelope.nextStep,
+		        audio->psg.ch4.length,
+		        audio->psg.ch4.stop ? 1 : 0,
+		        audio->psg.ch4.ratio,
+		        audio->psg.ch4.frequency,
+		        audio->psg.ch4.power ? 1 : 0,
+		        (unsigned)audio->psg.ch4.lastEvent,
+		        (unsigned)audio->psg.ch4.lfsr,
+		        (unsigned)audio->volume,
+		        audio->chALeft ? 1 : 0,
+		        audio->chARight ? 1 : 0,
+		        audio->chATimer ? 1 : 0,
+		        audio->volumeChA ? 1 : 0,
+		        audio->chBLeft ? 1 : 0,
+		        audio->chBRight ? 1 : 0,
+		        audio->chBTimer ? 1 : 0,
+		        audio->volumeChB ? 1 : 0,
+		        sampleQuad,
 		        audio->chA.internalRemaining,
 		        audio->chA.fifoRead,
 		        audio->chA.fifoWrite,
 		        audio->chB.internalRemaining,
 		        audio->chB.fifoRead,
 		        audio->chB.fifoWrite);
+	}
+	if (traceBackendSample) {
+		char sampleQuad[80];
+		_kirbyFormatSampleQuad(audio->currentSamples, samples, sampleQuad, sizeof(sampleQuad));
+		fprintf(stderr,
+		        "[BACKEND_AUDIO_SAMPLE] time=%d late=%u resolution=%u sample_index=%u last_sample=%d next_sample=%d buffered=%zu "
+		        "psg(frame=%d play4=%d sample4=%d ch4(env=%d dead=%d next=%d len=%d stop=%d ratio=%d freq=%d power=%d last=%u lfsr=%04X)) "
+		        "out=%s\n",
+		        timestamp,
+		        cyclesLate,
+		        GBARegisterSOUNDBIASGetResolution(audio->soundbias),
+		        audio->sampleIndex,
+		        audio->lastSample,
+		        mTimingUntil(&audio->p->timing, &audio->sampleEvent),
+		        mAudioBufferAvailable(&audio->psg.buffer),
+		        audio->psg.frame,
+		        audio->psg.playingCh4 ? 1 : 0,
+		        audio->psg.ch4.sample,
+		        audio->psg.ch4.envelope.currentVolume,
+		        audio->psg.ch4.envelope.dead,
+		        audio->psg.ch4.envelope.nextStep,
+		        audio->psg.ch4.length,
+		        audio->psg.ch4.stop ? 1 : 0,
+		        audio->psg.ch4.ratio,
+		        audio->psg.ch4.frequency,
+		        audio->psg.ch4.power ? 1 : 0,
+		        (unsigned) audio->psg.ch4.lastEvent,
+		        (unsigned) audio->psg.ch4.lfsr,
+		        sampleQuad);
 	}
 	mTimingSchedule(timing, &audio->sampleEvent, SAMPLE_INTERVAL - cyclesLate);
 }

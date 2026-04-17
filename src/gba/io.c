@@ -10,7 +10,33 @@
 #include <mgba/internal/gba/gba.h>
 #include <mgba/internal/gba/serialize.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 mLOG_DEFINE_CATEGORY(GBA_IO, "GBA I/O", "gba.io");
+
+static bool _kirbyTraceMgbaAudioIo(const struct GBA* gba) {
+	static int cached = -1;
+	if (cached < 0) {
+		const char* env = getenv("KIRBY_TRACE_MGBA_AUDIO");
+		cached = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached > 0 && gba && gba->cpu;
+}
+
+static void _kirbyTraceMgbaAudioIo8(struct GBA* gba, uint32_t address, uint8_t value) {
+	if (!_kirbyTraceMgbaAudioIo(gba)) {
+		return;
+	}
+
+	fprintf(stderr,
+	        "[MGBA_AUDIO_IO8] time=%d reg=%s addr=%03X value=%02X\n",
+	        mTimingCurrentTime(&gba->timing),
+	        GBAIORegisterNames[address & (GBA_SIZE_IO - 1)],
+	        (unsigned)(address & (GBA_SIZE_IO - 1)),
+	        value);
+}
 
 const char* const GBAIORegisterNames[] = {
 	// Video
@@ -650,21 +676,25 @@ void GBAIOWrite8(struct GBA* gba, uint32_t address, uint8_t value) {
 		gba->memory.io[GBA_REG(SOUND3CNT_X)] = (value & 0x40) << 8;
 		break;
 	case GBA_REG_SOUND4CNT_LO:
+		_kirbyTraceMgbaAudioIo8(gba, address, value);
 		GBAAudioSample(&gba->audio, mTimingCurrentTime(&gba->timing));
 		GBAudioWriteNR41(&gba->audio.psg, value);
 		break;
 	case GBA_REG_SOUND4CNT_LO + 1:
+		_kirbyTraceMgbaAudioIo8(gba, address, value);
 		GBAAudioSample(&gba->audio, mTimingCurrentTime(&gba->timing));
 		GBAudioWriteNR42(&gba->audio.psg, value);
 		gba->memory.io[GBA_REG(SOUND4CNT_LO)] = value << 8;
 		break;
 	case GBA_REG_SOUND4CNT_HI:
+		_kirbyTraceMgbaAudioIo8(gba, address, value);
 		GBAAudioSample(&gba->audio, mTimingCurrentTime(&gba->timing));
 		GBAudioWriteNR43(&gba->audio.psg, value);
 		gba->memory.io[GBA_REG(SOUND4CNT_HI)] &= 0x4000;
 		gba->memory.io[GBA_REG(SOUND4CNT_HI)] |= value;
 		break;
 	case GBA_REG_SOUND4CNT_HI + 1:
+		_kirbyTraceMgbaAudioIo8(gba, address, value);
 		GBAAudioSample(&gba->audio, mTimingCurrentTime(&gba->timing));
 		GBAudioWriteNR44(&gba->audio.psg, value);
 		gba->memory.io[GBA_REG(SOUND4CNT_HI)] &= 0x00FF;

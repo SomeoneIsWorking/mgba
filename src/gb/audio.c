@@ -44,6 +44,15 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
 
 static void GBAudioSample(struct GBAudio* audio, int32_t timestamp);
 
+static bool _kirbyTraceGbAudioFrame(void) {
+	static int cached = -1;
+	if (cached < 0) {
+		const char* env = getenv("KIRBY_TRACE_GB_AUDIO_FRAME");
+		cached = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached > 0;
+}
+
 static const int _squareChannelDuty[4][8] = {
 	{ 0, 0, 0, 0, 0, 0, 0, 1 },
 	{ 1, 0, 0, 0, 0, 0, 0, 1 },
@@ -647,10 +656,40 @@ void GBAudioRun(struct GBAudio* audio, int32_t timestamp, int channels) {
 }
 
 void GBAudioUpdateFrame(struct GBAudio* audio) {
+	int before = audio->frame;
 	if (!audio->enable) {
+		if (_kirbyTraceGbAudioFrame()) {
+			fprintf(stderr,
+			        "[GB_AUDIO_FRAME] audio=%p time=%d enable=0 before=%d after=%d skip=%d ch4(env=%d dead=%d ratio=%d freq=%d last=%u lfsr=%04X)\n",
+			        (void*) audio,
+			        mTimingCurrentTime(audio->timing),
+			        before,
+			        audio->frame,
+			        audio->skipFrame ? 1 : 0,
+			        audio->ch4.envelope.currentVolume,
+			        audio->ch4.envelope.dead,
+			        audio->ch4.ratio,
+			        audio->ch4.frequency,
+			        (unsigned) audio->ch4.lastEvent,
+			        (unsigned) audio->ch4.lfsr);
+		}
 		return;
 	}
 	if (audio->skipFrame) {
+		if (_kirbyTraceGbAudioFrame()) {
+			fprintf(stderr,
+			        "[GB_AUDIO_FRAME] audio=%p time=%d enable=1 before=%d after=%d skip=1 ch4(env=%d dead=%d ratio=%d freq=%d last=%u lfsr=%04X)\n",
+			        (void*) audio,
+			        mTimingCurrentTime(audio->timing),
+			        before,
+			        audio->frame,
+			        audio->ch4.envelope.currentVolume,
+			        audio->ch4.envelope.dead,
+			        audio->ch4.ratio,
+			        audio->ch4.frequency,
+			        (unsigned) audio->ch4.lastEvent,
+			        (unsigned) audio->ch4.lfsr);
+		}
 		audio->skipFrame = false;
 		return;
 	}
@@ -737,6 +776,20 @@ void GBAudioUpdateFrame(struct GBAudio* audio) {
 			}
 		}
 		break;
+	}
+	if (_kirbyTraceGbAudioFrame()) {
+		fprintf(stderr,
+		        "[GB_AUDIO_FRAME] audio=%p time=%d enable=1 before=%d after=%d skip=0 ch4(env=%d dead=%d ratio=%d freq=%d last=%u lfsr=%04X)\n",
+		        (void*) audio,
+		        mTimingCurrentTime(audio->timing),
+		        before,
+		        audio->frame,
+		        audio->ch4.envelope.currentVolume,
+		        audio->ch4.envelope.dead,
+		        audio->ch4.ratio,
+		        audio->ch4.frequency,
+		        (unsigned) audio->ch4.lastEvent,
+		        (unsigned) audio->ch4.lfsr);
 	}
 }
 
