@@ -16,6 +16,11 @@ static void _dmaEvent(struct mTiming* timing, void* context, uint32_t cyclesLate
 
 static void GBADMAService(struct GBA* gba, int number, struct GBADMA* info);
 
+__attribute__((weak)) void rgba_mgba_trace_dma_schedule(
+	int number, int32_t currentTime, int32_t when, int32_t cyclesLate);
+__attribute__((weak)) void rgba_mgba_trace_dma_service(
+	int number, int32_t currentTime, int32_t when, int32_t cycles, int32_t completionCycles);
+
 static const int DMA_OFFSET[] = { 1, -1, 0, 1 };
 
 static const uint32_t DMA_SRC_MASK[] = {
@@ -153,6 +158,9 @@ void GBADMASchedule(struct GBA* gba, int number, struct GBADMA* info) {
 			break;
 		}
 	}
+	if (rgba_mgba_trace_dma_schedule) {
+		rgba_mgba_trace_dma_schedule(number, mTimingCurrentTime(&gba->timing), info->when, 0);
+	}
 	GBADMAUpdate(gba);
 }
 
@@ -261,6 +269,8 @@ void GBADMAUpdate(struct GBA* gba) {
 }
 
 void GBADMAService(struct GBA* gba, int number, struct GBADMA* info) {
+	int32_t _rgbaTraceCurrentTime = mTimingCurrentTime(&gba->timing);
+	int32_t _rgbaTraceWhen = info->when;
 	struct GBAMemory* memory = &gba->memory;
 	struct ARMCore* cpu = gba->cpu;
 	uint32_t width = 2 << GBADMARegisterGetWidth(info->reg);
@@ -357,6 +367,10 @@ void GBADMAService(struct GBA* gba, int number, struct GBADMA* info) {
 		if (sourceRegion < GBA_REGION_ROM0 || destRegion < GBA_REGION_ROM0) {
 			info->when += 2;
 		}
+	}
+	if (rgba_mgba_trace_dma_service) {
+		rgba_mgba_trace_dma_service(number, _rgbaTraceCurrentTime, _rgbaTraceWhen,
+			cycles, info->when - _rgbaTraceWhen);
 	}
 	GBADMAUpdate(gba);
 }

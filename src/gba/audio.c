@@ -25,6 +25,11 @@ static const int SAMPLE_INTERVAL = GBA_ARM7TDMI_FREQUENCY / 0x4000;
 static int _applyBias(struct GBAAudio* audio, int sample);
 static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
 
+__attribute__((weak)) void rgba_mgba_trace_audio_queue(
+	int number, int8_t sample, int startSlot, int blockSamples,
+	int32_t sampleUntil, int32_t currentTime);
+__attribute__((weak)) void rgba_mgba_trace_audio_block_reset(void);
+
 void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
 	audio->sampleEvent.context = audio;
 	audio->sampleEvent.name = "GBA Audio Sample";
@@ -330,8 +335,18 @@ void GBAAudioSampleFIFO(struct GBAAudio* audio, int fifoId, int32_t cycles) {
 		until = bits;
 	}
 	int i;
-	for (i = bits - until; i < bits; ++i) {
+	int startSlot = bits - until;
+	for (i = startSlot; i < bits; ++i) {
 		channel->samples[i] = channel->internalSample;
+	}
+	if (rgba_mgba_trace_audio_queue) {
+		rgba_mgba_trace_audio_queue(
+			fifoId,
+			(int8_t) (channel->internalSample & 0xFF),
+			startSlot,
+			bits,
+			mTimingUntil(&audio->p->timing, &audio->sampleEvent),
+			mTimingCurrentTime(&audio->p->timing) - cycles);
 	}
 	if (channel->internalRemaining) {
 		channel->internalSample >>= 8;
@@ -404,6 +419,9 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	int samples = 2 << GBARegisterSOUNDBIASGetResolution(audio->soundbias);
 	memset(audio->chA.samples, audio->chA.samples[samples - 1], sizeof(audio->chA.samples));
 	memset(audio->chB.samples, audio->chB.samples[samples - 1], sizeof(audio->chB.samples));
+	if (rgba_mgba_trace_audio_block_reset) {
+		rgba_mgba_trace_audio_block_reset();
+	}
 
 	mCoreSyncLockAudio(audio->p->sync);
 	mAudioBufferWrite(&audio->psg.buffer, (int16_t*) audio->currentSamples, samples);
