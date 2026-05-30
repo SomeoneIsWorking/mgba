@@ -18,6 +18,9 @@
 
 mLOG_DEFINE_CATEGORY(GBA_VIDEO, "GBA Video", "gba.video");
 
+/* Kirby debug: absolute master cycle at the most recent frame start (vcount 0). */
+int32_t g_kirby_frame_start_cycle = 0;
+
 static void GBAVideoDummyRendererInit(struct GBAVideoRenderer* renderer);
 static void GBAVideoDummyRendererReset(struct GBAVideoRenderer* renderer);
 static void GBAVideoDummyRendererDeinit(struct GBAVideoRenderer* renderer);
@@ -170,6 +173,7 @@ void _startHdraw(struct mTiming* timing, void* context, uint32_t cyclesLate) {
 	// Note: state may be recorded during callbacks, so ensure it is consistent!
 	switch (video->vcount) {
 	case 0:
+		g_kirby_frame_start_cycle = mTimingCurrentTime(&video->p->timing);
 		GBAFrameStarted(video->p);
 		break;
 	case GBA_VIDEO_VERTICAL_PIXELS:

@@ -832,6 +832,15 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 	mLOG(GBA_MEM, GAME_ERROR, "Bad memory Store32: 0x%08X", address);
 
 void GBAStore32(struct ARMCore* cpu, uint32_t address, int32_t value, int* cycleCounter) {
+	if (address >= 0x03001640 && address <= 0x03001682 && getenv("KIRBY_MGBA_WATCH_CGB")) {
+		struct GBA* gbaW = (struct GBA*) cpu->master;
+		extern int32_t g_kirby_frame_start_cycle;
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gbaW->memory.iwram);
+		fprintf(stderr, "[MGBA_CGB32] gf=%u framerel=%d addr=0x%08X val=0x%08X\n",
+			(unsigned)gframe,
+			(int)(mTimingCurrentTime(&gbaW->timing) - g_kirby_frame_start_cycle),
+			(unsigned)address, (unsigned)value);
+	}
 	struct GBA* gba = (struct GBA*) cpu->master;
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
@@ -1041,6 +1050,22 @@ void GBAStore8(struct ARMCore* cpu, uint32_t address, int8_t value, int* cycleCo
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
 	uint16_t oldValue;
+	if (address >= 0x03001660 && address <= 0x03001682 && getenv("KIRBY_MGBA_WATCH_CGB")) {
+		extern int32_t g_kirby_frame_start_cycle;
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+		fprintf(stderr, "[MGBA_CGB8] gf=%u framerel=%d addr=0x%08X val=0x%02X\n",
+			(unsigned)gframe,
+			(int)(mTimingCurrentTime(&gba->timing) - g_kirby_frame_start_cycle),
+			(unsigned)address, (unsigned)(uint8_t)value);
+	}
+	if (address == 0x0400007D && (uint8_t)value == 0x80 && getenv("KIRBY_MGBA_WATCH_NR44")) {
+		extern int32_t g_kirby_frame_start_cycle;
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+		fprintf(stderr, "[MGBA_NR44] gf=%u framerel=%d pc=0x%08X lr=0x%08X\n",
+			(unsigned)gframe,
+			(int)(mTimingCurrentTime(&gba->timing) - g_kirby_frame_start_cycle),
+			(unsigned)cpu->gprs[15], (unsigned)cpu->gprs[14]);
+	}
 
 	switch (address >> BASE_OFFSET) {
 	case GBA_REGION_EWRAM:

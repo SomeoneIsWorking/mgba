@@ -324,6 +324,22 @@ void GBAIOInit(struct GBA* gba) {
 }
 
 void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
+	if ((address == 0x004 || address == 0x200 || address == 0x202 || address == 0x208) && getenv("KIRBY_MGBA_TRACE_IRQ")) {
+		fprintf(stderr, "[MGBA_IRQ] abs=%d addr=0x%03X val=0x%04X (DISPSTAT=0x%04X IE=0x%04X IF=0x%04X IME=0x%04X)\n",
+			(int)mTimingCurrentTime(&gba->timing), (unsigned)address, (unsigned)value,
+			(unsigned)gba->memory.io[0x004>>1], (unsigned)gba->memory.io[0x200>>1],
+			(unsigned)gba->memory.io[0x202>>1], (unsigned)gba->memory.io[0x208>>1]);
+	}
+	if (address >= GBA_REG_SOUND1CNT_LO && address <= GBA_REG_FIFO_B_HI && getenv("KIRBY_MGBA_TRACE_SND")) {
+		extern int32_t g_kirby_frame_start_cycle;
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+		fprintf(stderr, "[MGBA_SND] abs=%d gf=%u vcount=%u framerel=%d addr=0x%03X val=0x%04X\n",
+			(int)mTimingCurrentTime(&gba->timing),
+			(unsigned)gframe,
+			(unsigned)gba->memory.io[GBA_REG(VCOUNT)],
+			(int)(mTimingCurrentTime(&gba->timing) - g_kirby_frame_start_cycle),
+			(unsigned)address, (unsigned)value);
+	}
 	if (address < GBA_REG_SOUND1CNT_LO && (address > GBA_REG_VCOUNT || address < GBA_REG_DISPSTAT)) {
 		gba->memory.io[address >> 1] = gba->video.renderer->writeVideoRegister(gba->video.renderer, address, value);
 		return;
@@ -605,6 +621,16 @@ void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
 }
 
 void GBAIOWrite8(struct GBA* gba, uint32_t address, uint8_t value) {
+	if (address >= GBA_REG_SOUND1CNT_LO && address <= GBA_REG_FIFO_B_HI && getenv("KIRBY_MGBA_TRACE_SND")) {
+		extern int32_t g_kirby_frame_start_cycle;
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+		fprintf(stderr, "[MGBA_SND8] abs=%d gf=%u vcount=%u framerel=%d addr=0x%03X val=0x%02X\n",
+			(int)mTimingCurrentTime(&gba->timing),
+			(unsigned)gframe,
+			(unsigned)gba->memory.io[GBA_REG(VCOUNT)],
+			(int)(mTimingCurrentTime(&gba->timing) - g_kirby_frame_start_cycle),
+			(unsigned)address, (unsigned)value);
+	}
 	if (address >= GBA_REG_DEBUG_STRING && address - GBA_REG_DEBUG_STRING < sizeof(gba->debugString)) {
 		gba->debugString[address - GBA_REG_DEBUG_STRING] = value;
 		return;
