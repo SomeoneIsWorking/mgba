@@ -892,11 +892,32 @@ void GBAStore32(struct ARMCore* cpu, uint32_t address, int32_t value, int* cycle
 	}
 }
 
+/* Kirby: general memory-write watch. Set KIRBY_MGBA_WATCH="0xLO-0xHI" to log
+ * every 8/16/32-bit store landing in [LO,HI] with the writing PC. Used to find
+ * gameplay state (e.g. a helper Kirby's input field) by observing the ROM. */
+static void kirby_mgba_watch(uint32_t address, uint32_t value, uint32_t pc, int bits) {
+	static int s_init = 0;
+	static uint32_t s_lo = 1, s_hi = 0;
+	if (!s_init) {
+		s_init = 1;
+		const char* env = getenv("KIRBY_MGBA_WATCH");
+		if (env) {
+			unsigned lo, hi;
+			if (sscanf(env, "%x-%x", &lo, &hi) == 2) { s_lo = lo; s_hi = hi; }
+		}
+	}
+	if (address >= s_lo && address <= s_hi) {
+		fprintf(stderr, "[MGBA_WATCH] w%d addr=0x%08X val=0x%08X pc=0x%08X\n",
+			bits, address, value, pc);
+	}
+}
+
 void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycleCounter) {
 	struct GBA* gba = (struct GBA*) cpu->master;
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
 	int16_t oldValue;
+	kirby_mgba_watch(address, (uint16_t)value, cpu->gprs[15], 16);
 
 	switch (address >> BASE_OFFSET) {
 	case GBA_REGION_EWRAM:
@@ -1050,6 +1071,7 @@ void GBAStore8(struct ARMCore* cpu, uint32_t address, int8_t value, int* cycleCo
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
 	uint16_t oldValue;
+	kirby_mgba_watch(address, (uint8_t)value, cpu->gprs[15], 8);
 	if (address >= 0x03001660 && address <= 0x03001682 && getenv("KIRBY_MGBA_WATCH_CGB")) {
 		extern int32_t g_kirby_frame_start_cycle;
 		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
