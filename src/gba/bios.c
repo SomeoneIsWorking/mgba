@@ -405,6 +405,10 @@ static int32_t _Sqrt(uint32_t x, uint32_t* cycles) {
 	return bound;
 }
 
+/* Kirby debug: count boot halts (SWI 5 VBlankIntrWait / 4 IntrWait / 2 Halt)
+ * to compare against displayed frames — see coop-independent-screens.md. */
+unsigned long g_mgba_swi_vblank = 0, g_mgba_swi_intrwait = 0, g_mgba_swi_halt = 0;
+
 void GBASwi16(struct ARMCore* cpu, int immediate) {
 	struct GBA* gba = (struct GBA*) cpu->master;
 	mLOG(GBA_BIOS, DEBUG, "SWI: %02X r0: %08X r1: %08X r2: %08X r3: %08X",
@@ -433,16 +437,19 @@ void GBASwi16(struct ARMCore* cpu, int immediate) {
 		_RegisterRamReset(gba);
 		break;
 	case GBA_SWI_HALT:
+		g_mgba_swi_halt++;
 		ARMRaiseSWI(cpu);
 		return;
 	case GBA_SWI_STOP:
 		GBAStop(gba);
 		break;
 	case GBA_SWI_VBLANK_INTR_WAIT:
-	// VBlankIntrWait
-	// Fall through:
+		g_mgba_swi_vblank++;
+		ARMRaiseSWI(cpu);
+		return;
 	case GBA_SWI_INTR_WAIT:
 		// IntrWait
+		g_mgba_swi_intrwait++;
 		ARMRaiseSWI(cpu);
 		return;
 	case GBA_SWI_DIV:
