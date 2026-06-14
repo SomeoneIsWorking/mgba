@@ -324,6 +324,11 @@ void GBAIOInit(struct GBA* gba) {
 }
 
 void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
+	if (address == 0x000 && getenv("KIRBY_MGBA_TRACE_DISPCNT")) {
+		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+		fprintf(stderr, "[MGBA_DISPCNT] gf=%u old=0x%04X new=0x%04X\n",
+			(unsigned)gframe, (unsigned)gba->memory.io[0], (unsigned)value);
+	}
 	if ((address == 0x004 || address == 0x200 || address == 0x202 || address == 0x208) && getenv("KIRBY_MGBA_TRACE_IRQ")) {
 		fprintf(stderr, "[MGBA_IRQ] abs=%d addr=0x%03X val=0x%04X (DISPSTAT=0x%04X IE=0x%04X IF=0x%04X IME=0x%04X)\n",
 			(int)mTimingCurrentTime(&gba->timing), (unsigned)address, (unsigned)value,
