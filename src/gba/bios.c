@@ -475,6 +475,22 @@ void GBASwi16(struct ARMCore* cpu, int immediate) {
 		break;
 	case GBA_SWI_CPU_SET:
 	case GBA_SWI_CPU_FAST_SET:
+		if (getenv("KIRBY_TRACE_CPUSET")) {
+			uint32_t src = cpu->gprs[0];
+			uint32_t dst = cpu->gprs[1];
+			/* Focus on ROM->{palette,VRAM} copies (asset loads). */
+			if (src >= 0x08000000 && (dst >> 24) >= 0x05 && (dst >> 24) <= 0x07) {
+				uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+				uint32_t ctrl = cpu->gprs[2];
+				uint32_t units = ctrl & 0x1FFFFF;
+				uint32_t wbytes = (ctrl & (1 << 26)) ? units * 4 : units * 2;
+				fprintf(stderr,
+					"[CPUSET] gf=%u %s src=0x%08X dst=0x%08X bytes=%u\n",
+					(unsigned)gframe,
+					immediate == GBA_SWI_CPU_FAST_SET ? "FAST" : "SET ",
+					(unsigned)src, (unsigned)dst, (unsigned)wbytes);
+			}
+		}
 		if (cpu->gprs[0] >> BASE_OFFSET < GBA_REGION_EWRAM) {
 			mLOG(GBA_BIOS, GAME_ERROR, "Cannot CpuSet from BIOS");
 			break;
@@ -527,6 +543,24 @@ void GBASwi16(struct ARMCore* cpu, int immediate) {
 		case GBA_REGION_EWRAM:
 		case GBA_REGION_IWRAM:
 		case GBA_REGION_VRAM:
+			if (getenv("KIRBY_TRACE_LZ77")) {
+				uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+				uint32_t src = cpu->gprs[0];
+				uint32_t dst = cpu->gprs[1];
+				uint32_t header = cpu->memory.load32(cpu, src, 0);
+				uint32_t usize = header >> 8;
+				fprintf(stderr,
+					"[LZ77] gf=%u type=%s src=0x%08X dst=0x%08X usize=%u "
+					"DISPCNT=0x%04X BG0CNT=0x%04X BG1CNT=0x%04X BG2CNT=0x%04X BG3CNT=0x%04X\n",
+					(unsigned)gframe,
+					immediate == GBA_SWI_LZ77_UNCOMP_WRAM ? "WRAM" : "VRAM",
+					(unsigned)src, (unsigned)dst, (unsigned)usize,
+					(unsigned)gba->memory.io[GBA_REG(DISPCNT)],
+					(unsigned)gba->memory.io[GBA_REG(BG0CNT)],
+					(unsigned)gba->memory.io[GBA_REG(BG1CNT)],
+					(unsigned)gba->memory.io[GBA_REG(BG2CNT)],
+					(unsigned)gba->memory.io[GBA_REG(BG3CNT)]);
+			}
 			useStall = true;
 			_unLz77(gba, immediate == GBA_SWI_LZ77_UNCOMP_WRAM ? 1 : 2);
 			break;
