@@ -120,6 +120,25 @@ uint16_t GBADMAWriteCNT_HI(struct GBA* gba, int dma, uint16_t control) {
 		     currentDma->nextSource, currentDma->nextDest,
 		     currentDma->reg, currentDma->count & 0xFFFF);
 
+		/* Kirby asset-source recovery: log ROM -> {palette,VRAM,OAM} DMA copies
+		 * (KIRBY_TRACE_DMA), with the live OBJ-relevant regs, so a console->PC
+		 * port can map video-memory destinations back to ROM source addresses
+		 * (mirrors the SWI LZ77/CpuSet trace; catches DMA-driven OBJ/room loads). */
+		if (getenv("KIRBY_TRACE_DMA")) {
+			uint32_t src = currentDma->nextSource, dst = currentDma->nextDest;
+			uint32_t dr = dst >> BASE_OFFSET;
+			if (src >= GBA_BASE_ROM0 && (dr == GBA_REGION_PALETTE_RAM ||
+			    dr == GBA_REGION_VRAM || dr == GBA_REGION_OAM)) {
+				uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
+				uint32_t units = currentDma->count & 0xFFFF; if (units == 0) units = (dma == 3) ? 0x10000 : 0x4000;
+				fprintf(stderr,
+					"[DMA%d] gf=%u src=0x%08X dst=0x%08X bytes=%u DISPCNT=0x%04X\n",
+					dma, (unsigned)gframe, (unsigned)src, (unsigned)dst,
+					(unsigned)(units * width),
+					(unsigned)gba->memory.io[GBA_REG(DISPCNT)]);
+			}
+		}
+
 		currentDma->nextSource &= -width;
 		currentDma->nextDest &= -width;
 
