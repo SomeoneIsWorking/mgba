@@ -833,9 +833,10 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
 
 static void kirby_mgba_watch(uint32_t address, uint32_t value, uint32_t pc, int bits);
 static uint32_t g_kirby_watch_lr;
+static struct ARMCore* g_kirby_watch_cpu;
 
 void GBAStore32(struct ARMCore* cpu, uint32_t address, int32_t value, int* cycleCounter) {
-	g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint32_t)value, cpu->gprs[15], 32);
+	g_kirby_watch_cpu = cpu; g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint32_t)value, cpu->gprs[15], 32);
 	if (address >= 0x03001640 && address <= 0x03001682 && getenv("KIRBY_MGBA_WATCH_CGB")) {
 		struct GBA* gbaW = (struct GBA*) cpu->master;
 		extern int32_t g_kirby_frame_start_cycle;
@@ -914,6 +915,11 @@ static void kirby_mgba_watch(uint32_t address, uint32_t value, uint32_t pc, int 
 	if (address >= s_lo && address <= s_hi) {
 		fprintf(stderr, "[MGBA_WATCH] w%d addr=0x%08X val=0x%08X pc=0x%08X lr=0x%08X\n",
 			bits, address, value, pc, g_kirby_watch_lr);
+		if (getenv("KIRBY_MGBA_WATCH_REGS") && g_kirby_watch_cpu) {
+			uint32_t* g = g_kirby_watch_cpu->gprs;
+			fprintf(stderr, "[MGBA_WATCH_REGS] r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X\n",
+				g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+		}
 	}
 }
 
@@ -922,7 +928,7 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
 	int16_t oldValue;
-	g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint16_t)value, cpu->gprs[15], 16);
+	g_kirby_watch_cpu = cpu; g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint16_t)value, cpu->gprs[15], 16);
 
 	switch (address >> BASE_OFFSET) {
 	case GBA_REGION_EWRAM:
@@ -1076,7 +1082,7 @@ void GBAStore8(struct ARMCore* cpu, uint32_t address, int8_t value, int* cycleCo
 	struct GBAMemory* memory = &gba->memory;
 	int wait = 0;
 	uint16_t oldValue;
-	g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint8_t)value, cpu->gprs[15], 8);
+	g_kirby_watch_cpu = cpu; g_kirby_watch_lr = cpu->gprs[14]; kirby_mgba_watch(address, (uint8_t)value, cpu->gprs[15], 8);
 	if (address >= 0x03001660 && address <= 0x03001682 && getenv("KIRBY_MGBA_WATCH_CGB")) {
 		extern int32_t g_kirby_frame_start_cycle;
 		uint32_t gframe = 0; LOAD_32(gframe, 0x2E64, gba->memory.iwram);
