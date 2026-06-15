@@ -258,13 +258,35 @@ static inline void ARMStep(struct ARMCore* cpu) {
 	instruction(cpu, opcode);
 }
 
+void kirby_pcprobe(struct ARMCore* cpu, uint32_t pc);
+int g_kirby_pcprobe_on = -1;
 static inline void ThumbStep(struct ARMCore* cpu) {
 	uint32_t opcode = cpu->prefetch[0];
 	cpu->prefetch[0] = cpu->prefetch[1];
 	cpu->gprs[ARM_PC] += WORD_SIZE_THUMB;
 	LOAD_16(cpu->prefetch[1], cpu->gprs[ARM_PC] & cpu->memory.activeMask, cpu->memory.activeRegion);
+	if (g_kirby_pcprobe_on < 0) g_kirby_pcprobe_on = getenv("KIRBY_MGBA_PCPROBE") ? 1 : 0;
+	if (g_kirby_pcprobe_on) kirby_pcprobe(cpu, cpu->gprs[ARM_PC] - 2 * WORD_SIZE_THUMB);
 	ThumbInstruction instruction = _thumbTable[opcode >> 6];
 	instruction(cpu, opcode);
+}
+
+/* Kirby: KIRBY_MGBA_PCPROBE="0xADDR" — when THUMB PC hits ADDR, dump r0-r7.
+ * Used to capture register state (e.g. the entity struct ptr) at a chosen
+ * instruction without a full debugger. */
+void kirby_pcprobe(struct ARMCore* cpu, uint32_t pc) {
+	static int init = 0;
+	static uint32_t target = 0;
+	if (!init) {
+		init = 1;
+		const char* env = getenv("KIRBY_MGBA_PCPROBE");
+		if (env) target = strtoul(env, NULL, 0);
+	}
+	if (target && pc == target) {
+		uint32_t* g = cpu->gprs;
+		fprintf(stderr, "[PCPROBE] pc=%08X r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X\n",
+			pc, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+	}
 }
 
 void ARMRun(struct ARMCore* cpu) {
