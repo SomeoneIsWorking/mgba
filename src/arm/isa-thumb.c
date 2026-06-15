@@ -8,6 +8,9 @@
 #include <mgba/internal/arm/isa-inlines.h>
 #include <mgba/internal/arm/emitter-thumb.h>
 
+void kirby_seq_record(uint32_t target, uint32_t caller_pc);
+void kirby_seq_record_bx(uint32_t target, uint32_t bx_site);
+
 // Instruction definitions
 // Beware pre-processor insanity
 
@@ -398,12 +401,15 @@ DEFINE_INSTRUCTION_THUMB(BL2,
 	uint32_t pc = cpu->gprs[ARM_PC];
 	cpu->gprs[ARM_PC] = cpu->gprs[ARM_LR] + immediate;
 	cpu->gprs[ARM_LR] = pc - 1;
+	kirby_seq_record(cpu->gprs[ARM_PC], pc - 4);
 	currentCycles += ThumbWritePC(cpu);)
 
 DEFINE_INSTRUCTION_THUMB(BX,
 	int rm = (opcode >> 3) & 0xF;
+	uint32_t kirby_bx_site = cpu->gprs[ARM_PC] - 4;
 	_ARMSetMode(cpu, cpu->gprs[rm] & 0x00000001);
 	cpu->gprs[ARM_PC] = cpu->gprs[rm] & 0xFFFFFFFE;
+	kirby_seq_record_bx(cpu->gprs[ARM_PC], kirby_bx_site);
 	if (cpu->executionMode == MODE_THUMB) {
 		currentCycles += ThumbWritePC(cpu);
 	} else {
