@@ -9,6 +9,47 @@
 #include <mgba/internal/arm/isa-inlines.h>
 #include <mgba/internal/arm/isa-thumb.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Kirby: KIRBY_MGBA_SEQ — log the ordered sequence of CALL targets executed by
+ * the oracle (THUMB BL, ARM BL, and the __gnu_thumb1_call_via_rN indirect-call
+ * veneer's bx) to scratch/seq/oracle_seq.log. Diffed against the native
+ * dispatch_call sequence (KIRBY_TRACE_SEQ) to find the boot fork where native
+ * skips the intro entity spawn. ROM-targets only; bounded by KIRBY_MGBA_SEQ_MAX. */
+void kirby_seq_record(uint32_t target, uint32_t caller_pc) {
+	static FILE* fp = NULL;
+	static long limit = 0;
+	static long n = 0;
+	static int init = 0;
+	if (!init) {
+		init = 1;
+		const char* env = getenv("KIRBY_MGBA_SEQ");
+		if (env && env[0] && strcmp(env, "0") != 0) {
+			const char* path = getenv("KIRBY_MGBA_SEQ_FILE");
+			if (!path || !path[0]) path = "scratch/seq/oracle_seq.log";
+			fp = fopen(path, "w");
+			const char* lim = getenv("KIRBY_MGBA_SEQ_MAX");
+			limit = (lim && lim[0]) ? strtol(lim, NULL, 0) : 4000000L;
+		}
+	}
+	if (!fp) return;
+	if (target < 0x08000000u || target >= 0x0A000000u) return; /* ROM only */
+	if (n++ >= limit) {
+		if (n == limit + 1) { fflush(fp); fprintf(stderr, "[MGBA_SEQ] hit cap %ld\n", limit); }
+		return;
+	}
+	fprintf(fp, "%08X %08X\n", target & ~1u, caller_pc & ~1u);
+}
+
+/* Only a bx INSIDE the call-via veneer table (0x0815ABD4..0x0815AC0D) is an
+ * indirect CALL; bx elsewhere is a return / tail-jump and must not be logged. */
+void kirby_seq_record_bx(uint32_t target, uint32_t bx_site) {
+	if (bx_site < 0x0815ABD4u || bx_site > 0x0815AC0Du) return;
+	kirby_seq_record(target, bx_site);
+}
+
 void ARMSetPrivilegeMode(struct ARMCore* cpu, enum PrivilegeMode mode) {
 	if (mode == cpu->privilegeMode) {
 		// Not switching modes after all
