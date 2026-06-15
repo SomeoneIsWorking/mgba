@@ -9,6 +9,8 @@
 #include <mgba/internal/arm/emitter-arm.h>
 #include <mgba/internal/arm/isa-inlines.h>
 
+void kirby_seq_record(uint32_t target, uint32_t caller_pc);
+
 #define PSR_USER_MASK   0xF0000000
 #define PSR_PRIV_MASK   0x000000CF
 #define PSR_STATE_MASK  0x00000020
@@ -639,6 +641,7 @@ DEFINE_INSTRUCTION_ARM(BL,
 	int32_t immediate = (opcode & 0x00FFFFFF) << 8;
 	cpu->gprs[ARM_LR] = cpu->gprs[ARM_PC] - WORD_SIZE_ARM;
 	cpu->gprs[ARM_PC] += immediate >> 6;
+	kirby_seq_record(cpu->gprs[ARM_PC], cpu->gprs[ARM_LR] - WORD_SIZE_ARM);
 	currentCycles += ARMWritePC(cpu);)
 
 DEFINE_INSTRUCTION_ARM(BX,
