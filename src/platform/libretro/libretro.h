@@ -2596,6 +2596,23 @@ enum retro_mod
 */
 #define RETRO_ENVIRONMENT_GET_NETPLAY_CLIENT_INDEX (82 | RETRO_ENVIRONMENT_EXPERIMENTAL)
 
+/**
+ * Returns the clock every machine of a netplay session agreed on, for a core
+ * whose game can read one. This fork's own call, numbered clear of upstream's.
+ *
+ * @param[out] data <tt>struct retro_netplay_clock *</tt>.
+ * @return \\c true if the session has one and it was written.
+*/
+#define RETRO_ENVIRONMENT_GET_NETPLAY_CLOCK (256 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+
+struct retro_netplay_clock
+{
+   /** Unix time in milliseconds at the session's first emulated frame. */
+   int64_t epoch_ms;
+   /** Seconds east of UTC of the zone the clock's face shows. */
+   int32_t utc_offset;
+};
+
 /**@}*/
 
 /**
