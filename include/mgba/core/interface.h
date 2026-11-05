@@ -93,6 +93,8 @@ struct mRTCSource {
 	void (*sample)(struct mRTCSource*);
 
 	time_t (*unixTime)(struct mRTCSource*);
+	// What the clock's face shows at `time`, the host's zone when not set
+	void (*localDate)(struct mRTCSource*, time_t time, struct tm* date);
 
 	void (*serialize)(struct mRTCSource*, struct mStateExtdataItem*);
 	bool (*deserialize)(struct mRTCSource*, const struct mStateExtdataItem*);
@@ -118,6 +120,8 @@ struct mRTCGenericSource {
 	enum mRTCGenericType override;
 	int64_t value;
 	struct mRTCSource* custom;
+	bool fixedZone;
+	int32_t utcOffset;
 };
 
 struct mRTCGenericState {

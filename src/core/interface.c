@@ -7,6 +7,7 @@
 
 #include <mgba/core/core.h>
 #include <mgba/core/serialize.h>
+#include <mgba-util/formatting.h>
 
 DEFINE_VECTOR(mCoreCallbacksList, struct mCoreCallbacks);
 
@@ -43,6 +44,16 @@ static time_t _rtcGenericCallback(struct mRTCSource* source) {
 	case RTC_WALLCLOCK_OFFSET:
 		return time(0) + rtc->value / 1000LL;
 	}
+}
+
+static void _rtcGenericLocalDate(struct mRTCSource* source, time_t time, struct tm* date) {
+	struct mRTCGenericSource* rtc = (struct mRTCGenericSource*) source;
+	if (!rtc->fixedZone) {
+		localtime_r(&time, date);
+		return;
+	}
+	time += rtc->utcOffset;
+	*date = *gmtime(&time);
 }
 
 static void _rtcGenericSerialize(struct mRTCSource* source, struct mStateExtdataItem* item) {
@@ -106,6 +117,7 @@ void mRTCGenericSourceInit(struct mRTCGenericSource* rtc, struct mCore* core) {
 	rtc->override = RTC_NO_OVERRIDE;
 	rtc->d.sample = _rtcGenericSample;
 	rtc->d.unixTime = _rtcGenericCallback;
+	rtc->d.localDate = _rtcGenericLocalDate;
 	rtc->d.serialize = _rtcGenericSerialize;
 	rtc->d.deserialize = _rtcGenericDeserialize;
 }

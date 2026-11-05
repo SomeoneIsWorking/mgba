@@ -5,6 +5,8 @@
 
 #include "libretro.h"
 
+struct mCore;
+
 CXX_GUARD_START
 
 struct mLibretroNetplayState {
@@ -13,6 +15,7 @@ struct mLibretroNetplayState {
 
 void mLibretroNetplayInit(struct mLibretroNetplayState* state);
 bool mLibretroNetplayRefresh(struct mLibretroNetplayState* state, retro_environment_t environCallback);
+void mLibretroNetplayApplyClock(struct mCore* core, retro_environment_t environCallback);
 
 CXX_GUARD_END
 

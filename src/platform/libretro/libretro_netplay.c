@@ -1,5 +1,7 @@
 #include "libretro_netplay.h"
 
+#include <mgba/core/core.h>
+
 #include "libretro_log.h"
 
 void mLibretroNetplayInit(struct mLibretroNetplayState* state) {
@@ -8,6 +10,21 @@ void mLibretroNetplayInit(struct mLibretroNetplayState* state) {
 	}
 
 	state->rollbackContextActive = false;
+}
+
+// A cartridge's clock reads the host's time, which no two machines share: in a
+// session it runs from the agreed time with the emulated frames, in the agreed zone.
+void mLibretroNetplayApplyClock(struct mCore* core, retro_environment_t environCallback) {
+	unsigned localClientIndex = 0;
+	struct retro_netplay_clock clock;
+	if (!environCallback(RETRO_ENVIRONMENT_GET_NETPLAY_CLIENT_INDEX, &localClientIndex) ||
+	    !environCallback(RETRO_ENVIRONMENT_GET_NETPLAY_CLOCK, &clock)) {
+		return;
+	}
+	core->rtc.override = RTC_FAKE_EPOCH;
+	core->rtc.value = clock.epoch_ms;
+	core->rtc.fixedZone = true;
+	core->rtc.utcOffset = clock.utc_offset;
 }
 
 bool mLibretroNetplayRefresh(struct mLibretroNetplayState* state, retro_environment_t environCallback) {

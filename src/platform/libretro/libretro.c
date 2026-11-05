@@ -2022,6 +2022,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	}
 	mCoreInitConfig(core, NULL);
 	core->init(core);
+	mLibretroNetplayApplyClock(core, environCallback);
 	mLibretroMultiplayerSetPrimaryCore(core);
 
 #ifdef _3DS

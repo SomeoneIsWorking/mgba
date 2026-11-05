@@ -2,6 +2,7 @@
 #include "libretro_lockstep.h"
 
 #include "libretro_multiplayer_display.h"
+#include "libretro_netplay.h"
 
 #include "libretro_log.h"
 
@@ -234,6 +235,7 @@ static bool _initSecondaryCores(retro_environment_t environCallback, int numPlay
 
 		mCoreInitConfig(sMultiplayer->cores[i], NULL);
 		sMultiplayer->cores[i]->init(sMultiplayer->cores[i]);
+		mLibretroNetplayApplyClock(sMultiplayer->cores[i], environCallback);
 
 		sMultiplayer->outputBuffers[i] = malloc((size_t) sMultiplayer->video.maxVideoWidth * sMultiplayer->video.maxVideoHeight * VIDEO_BYTES_PER_PIXEL);
 		if (!sMultiplayer->outputBuffers[i]) {
