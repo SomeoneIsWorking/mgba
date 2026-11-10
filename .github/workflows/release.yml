@@ -76,7 +76,8 @@ jobs:
         shell: bash
         run: |
           built=$(find build -maxdepth 1 -name 'mgba_libretro.*' -type f \( -name '*.so' -o -name '*.dll' -o -name '*.dylib' \))
-          test "$(printf '%s\n' "$built" | wc -l)" = 1
+          set -- $built
+          test "$#" = 1
           mkdir -p stage out
           cp "$built" "stage/${{ matrix.library }}"
           (cd stage && zip -X -9 "../out/mgba_libretro_${{ matrix.build }}.zip" "${{ matrix.library }}")
