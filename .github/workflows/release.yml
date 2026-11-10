@@ -43,6 +43,10 @@ jobs:
             library: mgba_libretro_android.so
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: startsWith(matrix.build, 'android-')
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: ndk;${{ env.NDK_VERSION }}
       - name: Toolchain
         id: toolchain
         shell: bash
@@ -52,7 +56,7 @@ jobs:
               sudo apt-get update -q && sudo apt-get install -y -q ninja-build
               echo "args=" >> "$GITHUB_OUTPUT" ;;
             windows-*)
-              sudo apt-get update -q && sudo apt-get install -y -q ninja-build gcc-mingw-w64-x86-64
+              sudo apt-get update -q && sudo apt-get install -y -q ninja-build gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
               # Static libgcc and winpthread so the DLL needs nothing beside it.
               echo "args=-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres -DCMAKE_SHARED_LINKER_FLAGS=-static" >> "$GITHUB_OUTPUT" ;;
             macos-*)
@@ -60,7 +64,6 @@ jobs:
               echo "args=-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0" >> "$GITHUB_OUTPUT" ;;
             android-*)
               sudo apt-get update -q && sudo apt-get install -y -q ninja-build
-              yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
               ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
               echo "args=-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-28" >> "$GITHUB_OUTPUT" ;;
           esac
